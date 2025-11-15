@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人知识库管理系统</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <script src="https://unpkg.com/element-plus"></script>
+</head>
+<body>
+<div id="app">
+    <!-- 导航栏 -->
+    <header class="navbar">
+        <div class="nav-brand">
+            <h2>个人知识库</h2>
+        </div>
+        <nav class="nav-menu">
+            <a href="#dashboard" @click="showSection('dashboard')" :class="{active: currentSection === 'dashboard'}">仪表盘</a>
+            <a href="#documents" @click="showSection('documents')" :class="{active: currentSection === 'documents'}">文档管理</a>
+            <a href="#categories" @click="showSection('categories')" :class="{active: currentSection === 'categories'}">分类管理</a>
+            <a href="#tags" @click="showSection('tags')" :class="{active: currentSection === 'tags'}">标签管理</a>
+            <a href="#search" @click="showSection('search')" :class="{active: currentSection === 'search'}">搜索</a>
+        </nav>
+        <div class="nav-user">
+            <span v-if="currentUser">欢迎, {{ currentUser.username }}</span>
+            <button @click="logout" class="logout-btn">退出</button>
+        </div>
+    </header>
+
+    <!-- 主要内容区域 -->
+    <main class="main-content">
+        <!-- 仪表盘 -->
+        <section v-if="currentSection === 'dashboard'" class="section">
+            <dashboard-section></dashboard-section>
+        </section>
+
+        <!-- 文档管理 -->
+        <section v-if="currentSection === 'documents'" class="section">
+            <documents-section></documents-section>
+        </section>
+
+        <!-- 分类管理 -->
+        <section v-if="currentSection === 'categories'" class="section">
+            <categories-section></categories-section>
+        </section>
+
+        <!-- 标签管理 -->
+        <section v-if="currentSection === 'tags'" class="section">
+            <tags-section></tags-section>
+        </section>
+
+        <!-- 搜索 -->
+        <section v-if="currentSection === 'search'" class="section">
+            <search-section></search-section>
+        </section>
+    </main>
+</div>
+
+<script src="/js/api.js"></script>
+<script src="/js/components.js"></script>
+<script src="/js/app.js"></script>
+<script>
+    // 简单登录检查
+    if (!localStorage.getItem('currentUser') && !window.location.pathname.includes('/login')) {
+        window.location.href = '/login';
+    }
+</script>
+</body>
+</html>

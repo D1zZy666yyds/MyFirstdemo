@@ -1,0 +1,118 @@
+{
+  "documents" : [ {
+    "id" : 5,
+    "title" : "测试文档2",
+    "content" : "这是第二个测试文档",
+    "contentType" : "MARKDOWN",
+    "categoryId" : null,
+    "userId" : 1,
+    "createdTime" : [ 2025, 11, 12, 15, 57, 16 ],
+    "updatedTime" : [ 2025, 11, 12, 15, 57, 16 ],
+    "deleted" : false,
+    "deletedTime" : null,
+    "isFavorite" : null,
+    "favoriteCount" : null,
+    "tags" : null
+  }, {
+    "id" : 4,
+    "title" : "测试文档1",
+    "content" : "这是第一个测试文档",
+    "contentType" : "MARKDOWN",
+    "categoryId" : null,
+    "userId" : 1,
+    "createdTime" : [ 2025, 11, 12, 15, 57, 5 ],
+    "updatedTime" : [ 2025, 11, 12, 15, 57, 5 ],
+    "deleted" : false,
+    "deletedTime" : null,
+    "isFavorite" : null,
+    "favoriteCount" : null,
+    "tags" : null
+  }, {
+    "id" : 3,
+    "title" : "Spring Boot分类文档",
+    "content" : "这是一个属于Spring Boot分类的文档",
+    "contentType" : "MARKDOWN",
+    "categoryId" : 3,
+    "userId" : 1,
+    "createdTime" : [ 2025, 11, 12, 15, 46, 13 ],
+    "updatedTime" : [ 2025, 11, 12, 15, 46, 13 ],
+    "deleted" : false,
+    "deletedTime" : null,
+    "isFavorite" : null,
+    "favoriteCount" : null,
+    "tags" : null
+  }, {
+    "id" : 2,
+    "title" : "全文检索测试文档",
+    "content" : "这是一个用于测试全文检索功能的文档，包含Spring Boot和数据库相关内容。",
+    "contentType" : "MARKDOWN",
+    "categoryId" : null,
+    "userId" : 1,
+    "createdTime" : [ 2025, 11, 12, 15, 40, 22 ],
+    "updatedTime" : [ 2025, 11, 12, 15, 40, 22 ],
+    "deleted" : false,
+    "deletedTime" : null,
+    "isFavorite" : null,
+    "favoriteCount" : null,
+    "tags" : null
+  } ],
+  "categories" : [ {
+    "id" : 1,
+    "name" : "技术文档-更新版",
+    "parentId" : null,
+    "userId" : 1,
+    "sortOrder" : 1,
+    "createdTime" : [ 2025, 11, 11, 15, 34, 59 ],
+    "children" : null,
+    "documentCount" : null
+  }, {
+    "id" : 3,
+    "name" : "Spring Boot",
+    "parentId" : 1,
+    "userId" : 1,
+    "sortOrder" : 1,
+    "createdTime" : [ 2025, 11, 11, 15, 36, 7 ],
+    "children" : null,
+    "documentCount" : null
+  }, {
+    "id" : 2,
+    "name" : "学习笔记",
+    "parentId" : null,
+    "userId" : 1,
+    "sortOrder" : 2,
+    "createdTime" : [ 2025, 11, 11, 15, 35, 55 ],
+    "children" : null,
+    "documentCount" : null
+  }, {
+    "id" : 4,
+    "name" : "数据库",
+    "parentId" : 1,
+    "userId" : 1,
+    "sortOrder" : 2,
+    "createdTime" : [ 2025, 11, 11, 15, 36, 15 ],
+    "children" : null,
+    "documentCount" : null
+  } ],
+  "backupInfo" : {
+    "createdBy" : 1,
+    "type" : "FULL",
+    "name" : "full_backup_20251113_120424",
+    "createdAt" : [ 2025, 11, 13, 12, 4, 24, 554453200 ]
+  },
+  "tags" : [ {
+    "id" : 4,
+    "name" : "Java",
+    "userId" : 1,
+    "createdTime" : [ 2025, 11, 12, 15, 40, 58 ]
+  }, {
+    "id" : 2,
+    "name" : "数据库",
+    "userId" : 1,
+    "createdTime" : [ 2025, 11, 12, 15, 18, 14 ]
+  }, {
+    "id" : 1,
+    "name" : "Spring框架",
+    "userId" : 1,
+    "createdTime" : [ 2025, 11, 12, 15, 17, 49 ]
+  } ]
+}
