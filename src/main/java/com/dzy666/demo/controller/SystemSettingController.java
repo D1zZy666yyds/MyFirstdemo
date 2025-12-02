@@ -74,45 +74,4 @@ public class SystemSettingController {
             return JsonResult.error("系统设置更新失败: " + e.getMessage());
         }
     }
-
-    /**
-     * 创建系统设置
-     */
-    @PostMapping("/settings")
-    public JsonResult<Boolean> createSetting(@RequestBody SystemSetting setting,
-                                             @RequestParam Long userId) {
-        try {
-            boolean success = systemSettingService.createSetting(setting, userId);
-            return JsonResult.success("系统设置创建成功", success);
-        } catch (Exception e) {
-            return JsonResult.error("系统设置创建失败: " + e.getMessage());
-        }
-    }
-
-    /**
-     * 删除系统设置
-     */
-    @DeleteMapping("/settings/{key}")
-    public JsonResult<Boolean> deleteSetting(@PathVariable String key,
-                                             @RequestParam Long userId) {
-        try {
-            boolean success = systemSettingService.deleteSetting(key, userId);
-            return JsonResult.success("系统设置删除成功", success);
-        } catch (Exception e) {
-            return JsonResult.error("系统设置删除失败: " + e.getMessage());
-        }
-    }
-
-    /**
-     * 初始化默认系统设置
-     */
-    @PostMapping("/initialize")
-    public JsonResult<String> initializeSettings(@RequestParam Long userId) {
-        try {
-            systemSettingService.initializeDefaultSettings(userId);
-            return JsonResult.success("系统设置初始化完成");
-        } catch (Exception e) {
-            return JsonResult.error("系统设置初始化失败: " + e.getMessage());
-        }
-    }
 }

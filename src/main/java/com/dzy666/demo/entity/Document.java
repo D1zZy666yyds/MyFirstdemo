@@ -34,6 +34,6 @@ public class Document {
     private List<Tag> tags;
 
     public enum ContentType {
-        MARKDOWN, RICH_TEXT
+        MARKDOWN, RICH_TEXT, TEXT
     }
 }

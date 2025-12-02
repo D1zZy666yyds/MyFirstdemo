@@ -10,6 +10,10 @@ public class User {
     private String email;
     private String password;
     private String salt;
+    private String nickname;
+    private String bio;
     private LocalDateTime createdTime;
     private LocalDateTime updatedTime;
+    private LocalDateTime lastLoginTime;
+    private LocalDateTime lastLogoutTime;
 }

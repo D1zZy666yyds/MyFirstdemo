@@ -8,6 +8,7 @@ import java.util.List;
 public class Category {
     private Long id;
     private String name;
+    private String description; // 新增字段
     private Long parentId;
     private Long userId;
     private Integer sortOrder;

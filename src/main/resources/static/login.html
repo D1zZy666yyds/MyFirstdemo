@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - 个人知识库管理系统</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/login.css">
+</head>
+<body>
+<div class="login-container">
+    <div class="login-header">
+        <h1>📚 个人知识库管理系统</h1>
+        <p>高效管理您的知识资产</p>
+    </div>
+
+    <div class="login-card">
+        <div class="card-header">
+            <h2>用户登录</h2>
+        </div>
+
+        <form id="login-form" class="login-form">
+            <div class="form-group">
+                <label for="username">用户名</label>
+                <input
+                        type="text"
+                        id="username"
+                        name="username"
+                        required
+                        placeholder="请输入用户名"
+                        class="form-input"
+                >
+                <div class="input-icon">👤</div>
+                <div id="username-error" class="error-message"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="password">密码</label>
+                <input
+                        type="password"
+                        id="password"
+                        name="password"
+                        required
+                        placeholder="请输入密码"
+                        class="form-input"
+                >
+                <div class="input-icon">🔒</div>
+                <div id="password-error" class="error-message"></div>
+            </div>
+
+            <div class="form-options">
+                <label class="remember-me">
+                    <input type="checkbox" id="remember-me">
+                    <span>记住我</span>
+                </label>
+                <a href="javascript:void(0)" onclick="showForgotPassword()" class="forgot-password">
+                    忘记密码？
+                </a>
+            </div>
+
+            <button type="submit" class="login-btn" id="login-btn">
+                <span id="login-text">登录</span>
+                <div id="login-loading" class="loading-spinner" style="display: none;"></div>
+            </button>
+
+            <div id="login-message" class="message-container"></div>
+
+            <div class="register-link">
+                还没有账号？<a href="javascript:void(0)" onclick="showRegisterModal()">立即注册</a>
+            </div>
+        </form>
+    </div>
+
+    <div class="login-features">
+        <div class="feature-item">
+            <div class="feature-icon">📝</div>
+            <h3>智能文档管理</h3>
+            <p>支持Markdown，实时预览</p>
+        </div>
+        <div class="feature-item">
+            <div class="feature-icon">🔍</div>
+            <h3>全文搜索</h3>
+            <p>快速定位所需知识</p>
+        </div>
+        <div class="feature-item">
+            <div class="feature-icon">📊</div>
+            <h3>知识图谱</h3>
+            <p>可视化知识关联</p>
+        </div>
+    </div>
+</div>
+
+<!-- 注册模态框 -->
+<div id="register-modal" class="modal" style="display: none;">
+    <div class="modal-content modal-sm">
+        <div class="modal-header">
+            <h3>用户注册</h3>
+            <span class="close" onclick="closeRegisterModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <form id="register-form">
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" id="reg-username" required class="form-input" placeholder="请输入用户名">
+                    <div class="input-hint">3-20个字符，支持字母、数字、下划线</div>
+                    <div id="reg-username-error" class="error-message"></div>
+                </div>
+                <div class="form-group">
+                    <label>邮箱</label>
+                    <input type="email" id="reg-email" required class="form-input" placeholder="请输入邮箱">
+                    <div id="reg-email-error" class="error-message"></div>
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" id="reg-password" required class="form-input" placeholder="请输入密码">
+                    <div class="input-hint">至少6个字符</div>
+                    <div id="reg-password-error" class="error-message"></div>
+                </div>
+                <div class="form-group">
+                    <label>确认密码</label>
+                    <input type="password" id="reg-confirm-password" required class="form-input" placeholder="请再次输入密码">
+                    <div id="reg-confirm-password-error" class="error-message"></div>
+                </div>
+                <div id="register-message" class="message-container"></div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">注册</button>
+                    <button type="button" class="btn-secondary" onclick="closeRegisterModal()">取消</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/login.js"></script>
+</body>
+</html>

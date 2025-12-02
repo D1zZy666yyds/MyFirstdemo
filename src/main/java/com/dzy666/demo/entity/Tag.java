@@ -9,4 +9,6 @@ public class Tag {
     private String name;
     private Long userId;
     private LocalDateTime createdTime;
+    // 新增文档计数字段
+    private Integer documentCount;
 }

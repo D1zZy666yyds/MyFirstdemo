@@ -51,4 +51,19 @@ public interface CategoryMapper {
     // 获取用户分类数量
     @Select("SELECT COUNT(*) FROM categories WHERE user_id = #{userId}")
     int countByUserId(Long userId);
+
+    // 新增方法：更新分类排序
+    @Update("UPDATE categories SET sort_order = #{sortOrder} WHERE id = #{id} AND user_id = #{userId}")
+    int updateSortOrder(@Param("id") Long id, @Param("userId") Long userId, @Param("sortOrder") Integer sortOrder);
+
+    // 新增方法：更新父分类ID
+    @Update("UPDATE categories SET parent_id = #{parentId} WHERE id = #{id} AND user_id = #{userId}")
+    int updateParentId(@Param("id") Long id, @Param("userId") Long userId, @Param("parentId") Long parentId);
+
+    // 新增方法：搜索分类
+    @Select("SELECT id, name, parent_id as parentId, user_id as userId, " +
+            "sort_order as sortOrder, created_time as createdTime " +
+            "FROM categories WHERE user_id = #{userId} AND name LIKE CONCAT('%', #{keyword}, '%') " +
+            "ORDER BY sort_order, created_time")
+    List<Category> searchByName(@Param("keyword") String keyword, @Param("userId") Long userId);
 }

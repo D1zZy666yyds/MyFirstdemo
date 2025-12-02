@@ -15,9 +15,6 @@ public class StatisticsController {
     @Autowired
     private StatisticsService statisticsService;
 
-    /**
-     * 获取用户总体统计
-     */
     @GetMapping("/overview/{userId}")
     public JsonResult<Map<String, Object>> getUserOverview(@PathVariable Long userId) {
         try {
@@ -28,9 +25,6 @@ public class StatisticsController {
         }
     }
 
-    /**
-     * 获取分类分布
-     */
     @GetMapping("/category-distribution/{userId}")
     public JsonResult<Map<String, Object>> getCategoryDistribution(@PathVariable Long userId) {
         try {
@@ -41,9 +35,6 @@ public class StatisticsController {
         }
     }
 
-    /**
-     * 获取标签使用统计
-     */
     @GetMapping("/tag-usage/{userId}")
     public JsonResult<List<Map<String, Object>>> getTagUsage(@PathVariable Long userId) {
         try {
@@ -54,9 +45,6 @@ public class StatisticsController {
         }
     }
 
-    /**
-     * 获取文档创建趋势
-     */
     @GetMapping("/creation-trend/{userId}")
     public JsonResult<Map<String, Long>> getCreationTrend(
             @PathVariable Long userId,
@@ -69,9 +57,6 @@ public class StatisticsController {
         }
     }
 
-    /**
-     * 获取热门文档
-     */
     @GetMapping("/popular-documents/{userId}")
     public JsonResult<List<Map<String, Object>>> getPopularDocuments(
             @PathVariable Long userId,
@@ -81,6 +66,36 @@ public class StatisticsController {
             return JsonResult.success(popularDocs);
         } catch (Exception e) {
             return JsonResult.error(e.getMessage());
+        }
+    }
+
+    /**
+     * 获取用户活跃度分析
+     */
+    @GetMapping("/activity-analysis/{userId}")
+    public JsonResult<Map<String, Object>> getActivityAnalysis(
+            @PathVariable Long userId,
+            @RequestParam(defaultValue = "30") int days) {
+        try {
+            Map<String, Object> activity = statisticsService.getUserActivityAnalysis(userId, days);
+            return JsonResult.success(activity);
+        } catch (Exception e) {
+            return JsonResult.error("获取活跃度分析失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取时间分布统计
+     */
+    @GetMapping("/time-distribution/{userId}")
+    public JsonResult<Map<String, Object>> getTimeDistribution(
+            @PathVariable Long userId,
+            @RequestParam(defaultValue = "7") int days) {
+        try {
+            Map<String, Object> timeDistribution = statisticsService.getTimeDistribution(userId, days);
+            return JsonResult.success(timeDistribution);
+        } catch (Exception e) {
+            return JsonResult.error("获取时间分布统计失败: " + e.getMessage());
         }
     }
 }

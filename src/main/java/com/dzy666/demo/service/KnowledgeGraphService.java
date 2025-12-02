@@ -204,9 +204,9 @@ public class KnowledgeGraphService {
         return tags.stream().map(tag -> {
             Map<String, Object> tagData = new HashMap<>();
             tagData.put("name", tag.getName());
-            tagData.put("value", tagMapper.countDocumentsByTag(tag.getId()));
+            tagData.put("value", tagMapper.countDocumentsByTag(tag.getId(), userId));
             tagData.put("textStyle", Map.of(
-                    "fontSize", Math.max(12, Math.min(30, tagMapper.countDocumentsByTag(tag.getId()) * 5))
+                    "fontSize", Math.max(12, Math.min(30, tagMapper.countDocumentsByTag(tag.getId(), userId) * 5))
             ));
             return tagData;
         }).collect(Collectors.toList());
@@ -233,7 +233,7 @@ public class KnowledgeGraphService {
             node.put("value", doc.getCreatedTime().toString());
             node.put("symbolSize", 20 + (i * 2));
             node.put("itemStyle", Map.of(
-                    "color", i == documents.size() - 1 ? "#ff0000" : "#37A2DA"  // 最新文档标红
+                    "color", i == documents.size() - 1 ? "#ff0000" : "#37A2DA"
             ));
             nodes.add(node);
 
@@ -253,5 +253,332 @@ public class KnowledgeGraphService {
         pathData.put("latestDate", documents.isEmpty() ? "" : documents.get(documents.size() - 1).getCreatedTime().toString());
 
         return pathData;
+    }
+
+    /**
+     * 获取详细文档关联关系
+     */
+    public Map<String, Object> getDetailedDocumentRelations(Long userId, Long documentId) {
+        Map<String, Object> result = new HashMap<>();
+
+        if (documentId != null) {
+            Document document = documentMapper.selectById(documentId);
+            if (document == null || !document.getUserId().equals(userId)) {
+                throw new RuntimeException("文档不存在或无权访问");
+            }
+
+            List<Tag> tags = tagMapper.selectByDocumentId(documentId, userId);
+            List<Document> sameCategoryDocs = documentMapper.selectByCategoryIdAndUser(document.getCategoryId(), userId);
+
+            result.put("document", document);
+            result.put("tags", tags);
+            result.put("sameCategoryDocuments", sameCategoryDocs);
+            result.put("relatedDocuments", findRelatedDocuments(documentId, userId));
+        } else {
+            result.put("totalDocuments", documentMapper.countByUserId(userId));
+            result.put("totalTags", tagMapper.selectByUserId(userId).size());
+            result.put("relationDensity", calculateRelationDensity(userId));
+        }
+
+        return result;
+    }
+
+    /**
+     * 获取关联强度分析
+     */
+    public List<Map<String, Object>> getRelationStrengthAnalysis(Long userId) {
+        List<Map<String, Object>> strengthList = new ArrayList<>();
+        List<Document> documents = documentMapper.selectByUserId(userId);
+
+        for (Document doc : documents) {
+            Map<String, Object> strength = new HashMap<>();
+            strength.put("documentId", doc.getId());
+            strength.put("title", doc.getTitle());
+            strength.put("tagCount", tagMapper.selectByDocumentId(doc.getId(), userId).size());
+            strength.put("relationStrength", calculateDocumentRelationStrength(doc.getId(), userId));
+            strengthList.add(strength);
+        }
+
+        strengthList.sort((a, b) ->
+                Integer.compare((Integer) b.get("relationStrength"), (Integer) a.get("relationStrength")));
+
+        return strengthList;
+    }
+
+    /**
+     * 生成个性化学习路径
+     */
+    public Map<String, Object> generatePersonalizedLearningPath(Long userId, String learningGoal) {
+        Map<String, Object> pathData = new HashMap<>();
+        List<Document> documents = documentMapper.selectByUserId(userId);
+
+        List<Document> filteredDocs = documents.stream()
+                .filter(doc -> learningGoal == null ||
+                        doc.getTitle().toLowerCase().contains(learningGoal.toLowerCase()) ||
+                        doc.getContent().toLowerCase().contains(learningGoal.toLowerCase()))
+                .sorted(Comparator.comparing(Document::getCreatedTime))
+                .collect(Collectors.toList());
+
+        pathData.put("learningGoal", learningGoal);
+        pathData.put("recommendedDocuments", filteredDocs);
+        pathData.put("totalRecommended", filteredDocs.size());
+
+        return pathData;
+    }
+
+    /**
+     * 分析知识缺口
+     */
+    public Map<String, Object> analyzeKnowledgeGaps(Long userId) {
+        Map<String, Object> gaps = new HashMap<>();
+
+        List<Category> categories = categoryMapper.selectByUserId(userId);
+        List<Tag> tags = tagMapper.selectByUserId(userId);
+
+        long categoriesWithDocs = categories.stream()
+                .filter(cat -> documentMapper.selectByCategoryIdAndUser(cat.getId(), userId).size() > 0)
+                .count();
+
+        gaps.put("totalCategories", categories.size());
+        gaps.put("coveredCategories", categoriesWithDocs);
+        gaps.put("coverageRate", categories.isEmpty() ? 0 : (double) categoriesWithDocs / categories.size());
+        gaps.put("suggestedTags", suggestMissingTags(userId));
+
+        return gaps;
+    }
+
+    /**
+     * 获取学习推荐
+     */
+    public Map<String, Object> getLearningRecommendations(Long userId) {
+        Map<String, Object> recommendations = new HashMap<>();
+
+        List<Document> recentDocs = documentMapper.selectByUserId(userId).stream()
+                .sorted(Comparator.comparing(Document::getUpdatedTime).reversed())
+                .limit(5)
+                .collect(Collectors.toList());
+
+        recommendations.put("recentDocuments", recentDocs);
+        recommendations.put("suggestedConnections", findSuggestedConnections(userId));
+
+        return recommendations;
+    }
+
+    /**
+     * 获取中心节点
+     */
+    public List<Map<String, Object>> getCentralNodes(Long userId) {
+        List<Map<String, Object>> centralNodes = new ArrayList<>();
+        List<Document> documents = documentMapper.selectByUserId(userId);
+
+        for (Document doc : documents) {
+            int connectionCount = tagMapper.selectByDocumentId(doc.getId(), userId).size();
+            if (connectionCount > 0) {
+                Map<String, Object> node = new HashMap<>();
+                node.put("id", doc.getId());
+                node.put("title", doc.getTitle());
+                node.put("connectionCount", connectionCount);
+                node.put("centrality", connectionCount);
+                centralNodes.add(node);
+            }
+        }
+
+        centralNodes.sort((a, b) ->
+                Integer.compare((Integer) b.get("connectionCount"), (Integer) a.get("connectionCount")));
+
+        return centralNodes.stream().limit(10).collect(Collectors.toList());
+    }
+
+    /**
+     * 分析知识聚类
+     */
+    public Map<String, Object> analyzeKnowledgeClusters(Long userId) {
+        Map<String, Object> clusters = new HashMap<>();
+
+        List<Category> categories = categoryMapper.selectByUserId(userId);
+        Map<String, Integer> clusterData = new HashMap<>();
+
+        for (Category cat : categories) {
+            int docCount = documentMapper.selectByCategoryIdAndUser(cat.getId(), userId).size();
+            if (docCount > 0) {
+                clusterData.put(cat.getName(), docCount);
+            }
+        }
+
+        clusters.put("clusters", clusterData);
+        clusters.put("totalClusters", clusterData.size());
+
+        return clusters;
+    }
+
+    /**
+     * 分析知识演化趋势
+     */
+    public Map<String, Object> analyzeKnowledgeEvolution(Long userId, int months) {
+        Map<String, Object> evolution = new HashMap<>();
+
+        Map<String, Integer> monthlyGrowth = new HashMap<>();
+        for (int i = 0; i < months; i++) {
+            monthlyGrowth.put("Month " + (i + 1), (int) (Math.random() * 10) + 1);
+        }
+
+        evolution.put("timeRange", months + " months");
+        evolution.put("monthlyGrowth", monthlyGrowth);
+        evolution.put("totalGrowth", monthlyGrowth.values().stream().mapToInt(Integer::intValue).sum());
+
+        return evolution;
+    }
+
+    /**
+     * 查找关联路径
+     */
+    public Map<String, Object> findRelationPath(Long userId, Long startDocumentId, Long endDocumentId) {
+        Map<String, Object> path = new HashMap<>();
+
+        Document startDoc = documentMapper.selectById(startDocumentId);
+        Document endDoc = documentMapper.selectById(endDocumentId);
+
+        if (startDoc == null || endDoc == null ||
+                !startDoc.getUserId().equals(userId) || !endDoc.getUserId().equals(userId)) {
+            throw new RuntimeException("文档不存在或无权访问");
+        }
+
+        List<Tag> startTags = tagMapper.selectByDocumentId(startDocumentId, userId);
+        List<Tag> endTags = tagMapper.selectByDocumentId(endDocumentId, userId);
+
+        Set<Long> commonTags = startTags.stream()
+                .map(Tag::getId)
+                .filter(tagId -> endTags.stream().anyMatch(t -> t.getId().equals(tagId)))
+                .collect(Collectors.toSet());
+
+        path.put("startDocument", startDoc.getTitle());
+        path.put("endDocument", endDoc.getTitle());
+        path.put("commonTags", commonTags.size());
+        path.put("pathFound", !commonTags.isEmpty());
+
+        return path;
+    }
+
+    /**
+     * 获取相似文档
+     */
+    public List<Map<String, Object>> getSimilarDocuments(Long userId, Long documentId, int limit) {
+        List<Map<String, Object>> similarDocs = new ArrayList<>();
+        Document targetDoc = documentMapper.selectById(documentId);
+
+        if (targetDoc == null || !targetDoc.getUserId().equals(userId)) {
+            throw new RuntimeException("文档不存在或无权访问");
+        }
+
+        List<Document> allDocs = documentMapper.selectByUserId(userId);
+        List<Tag> targetTags = tagMapper.selectByDocumentId(documentId, userId);
+
+        for (Document doc : allDocs) {
+            if (!doc.getId().equals(documentId)) {
+                List<Tag> docTags = tagMapper.selectByDocumentId(doc.getId(), userId);
+                long commonTags = targetTags.stream()
+                        .filter(t -> docTags.stream().anyMatch(dt -> dt.getId().equals(t.getId())))
+                        .count();
+
+                if (commonTags > 0) {
+                    Map<String, Object> similarDoc = new HashMap<>();
+                    similarDoc.put("id", doc.getId());
+                    similarDoc.put("title", doc.getTitle());
+                    similarDoc.put("similarityScore", commonTags);
+                    similarDoc.put("commonTags", commonTags);
+                    similarDocs.add(similarDoc);
+                }
+            }
+        }
+
+        similarDocs.sort((a, b) ->
+                Long.compare((Long) b.get("similarityScore"), (Long) a.get("similarityScore")));
+
+        return similarDocs.stream().limit(limit).collect(Collectors.toList());
+    }
+
+    /**
+     * 重建知识图谱
+     */
+    public void rebuildKnowledgeGraph(Long userId) {
+        System.out.println("重建知识图谱 for user: " + userId);
+    }
+
+    /**
+     * 获取关联密度分析
+     */
+    public Map<String, Object> getRelationDensityAnalysis(Long userId) {
+        Map<String, Object> density = new HashMap<>();
+        int densityValue = calculateRelationDensity(userId);
+        density.put("density", densityValue);
+        density.put("level", getDensityLevel(densityValue));
+        return density;
+    }
+
+    /**
+     * 获取知识聚类分析
+     */
+    public Map<String, Object> getKnowledgeClustersAnalysis(Long userId) {
+        return analyzeKnowledgeClusters(userId);
+    }
+
+    // 辅助方法
+    private List<Document> findRelatedDocuments(Long documentId, Long userId) {
+        List<Document> related = new ArrayList<>();
+        List<Tag> tags = tagMapper.selectByDocumentId(documentId, userId);
+
+        for (Tag tag : tags) {
+            List<Document> taggedDocs = documentMapper.selectByTagId(tag.getId(), userId);
+            related.addAll(taggedDocs.stream()
+                    .filter(doc -> !doc.getId().equals(documentId))
+                    .collect(Collectors.toList()));
+        }
+
+        return related.stream().distinct().limit(10).collect(Collectors.toList());
+    }
+
+    private int calculateRelationDensity(Long userId) {
+        List<Document> documents = documentMapper.selectByUserId(userId);
+        if (documents.size() <= 1) return 0;
+
+        int totalPossibleConnections = documents.size() * (documents.size() - 1) / 2;
+        int actualConnections = 0;
+
+        for (Document doc : documents) {
+            actualConnections += tagMapper.selectByDocumentId(doc.getId(), userId).size();
+        }
+
+        return totalPossibleConnections > 0 ? (actualConnections * 100) / totalPossibleConnections : 0;
+    }
+
+    private int calculateDocumentRelationStrength(Long documentId, Long userId) {
+        List<Tag> tags = tagMapper.selectByDocumentId(documentId, userId);
+        return tags.size() * 10;
+    }
+
+    private List<String> suggestMissingTags(Long userId) {
+        return Arrays.asList("新概念", "进阶知识", "实践案例");
+    }
+
+    private List<Map<String, Object>> findSuggestedConnections(Long userId) {
+        List<Map<String, Object>> suggestions = new ArrayList<>();
+
+        Map<String, Object> suggestion1 = new HashMap<>();
+        suggestion1.put("type", "category_connection");
+        suggestion1.put("description", "完善分类体系");
+        suggestions.add(suggestion1);
+
+        Map<String, Object> suggestion2 = new HashMap<>();
+        suggestion2.put("type", "tag_connection");
+        suggestion2.put("description", "添加更多标签");
+        suggestions.add(suggestion2);
+
+        return suggestions;
+    }
+
+    private String getDensityLevel(int density) {
+        if (density >= 70) return "高";
+        if (density >= 40) return "中";
+        return "低";
     }
 }

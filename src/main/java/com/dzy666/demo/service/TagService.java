@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class TagService {
@@ -20,32 +21,59 @@ public class TagService {
     }
 
     public Tag createTag(Tag tag) {
-        // 检查标签是否已存在
         Tag existingTag = tagMapper.selectByNameAndUser(tag.getName(), tag.getUserId());
         if (existingTag != null) {
-            return existingTag; // 返回已存在的标签
+            System.out.println("标签 '" + tag.getName() + "' 已存在，返回现有标签 ID: " + existingTag.getId());
+            return existingTag;
         }
+
+        System.out.println("创建新标签: " + tag.getName() + ", 用户ID: " + tag.getUserId());
         tagMapper.insert(tag);
         return tag;
     }
 
     public Tag getTagById(Long id, Long userId) {
-        return tagMapper.selectByIdAndUser(id, userId);
+        Tag tag = tagMapper.selectByIdAndUser(id, userId);
+        if (tag != null) {
+            // 修复：添加userId参数
+            int count = tagMapper.countDocumentsByTag(id, userId);
+            tag.setDocumentCount(count);
+        }
+        return tag;
     }
 
     public List<Tag> getUserTags(Long userId) {
-        return tagMapper.selectByUserId(userId);
+        List<Tag> tags = tagMapper.selectByUserId(userId);
+        // 为每个标签设置文档计数
+        for (Tag tag : tags) {
+            // 修复：添加userId参数
+            int count = tagMapper.countDocumentsByTag(tag.getId(), userId);
+            tag.setDocumentCount(count);
+            System.out.println("用户 " + userId + " 的标签: '" + tag.getName() + "' (ID:" + tag.getId() + ") 文档计数: " + count);
+        }
+        return tags;
     }
 
     public Tag updateTag(Tag tag) {
+        Tag existingTag = tagMapper.selectByNameAndUser(tag.getName(), tag.getUserId());
+        if (existingTag != null && !existingTag.getId().equals(tag.getId())) {
+            throw new RuntimeException("标签名称 '" + tag.getName() + "' 已存在");
+        }
+
         tagMapper.update(tag);
-        return tagMapper.selectByIdAndUser(tag.getId(), tag.getUserId());
+        Tag updatedTag = tagMapper.selectByIdAndUser(tag.getId(), tag.getUserId());
+        if (updatedTag != null) {
+            // 修复：添加userId参数
+            int count = tagMapper.countDocumentsByTag(tag.getId(), tag.getUserId());
+            updatedTag.setDocumentCount(count);
+        }
+        return updatedTag;
     }
 
     @Transactional
     public boolean deleteTag(Long id, Long userId) {
-        // 检查是否有文档使用该标签
-        int docCount = tagMapper.countDocumentsByTag(id);
+        // 修复：添加userId参数
+        int docCount = tagMapper.countDocumentsByTag(id, userId);
         if (docCount > 0) {
             throw new RuntimeException("该标签已被文档使用，无法删除");
         }
@@ -54,21 +82,22 @@ public class TagService {
     }
 
     public List<Tag> getDocumentTags(Long documentId, Long userId) {
-        return tagMapper.selectByDocumentId(documentId, userId);
+        List<Tag> tags = tagMapper.selectByDocumentId(documentId, userId);
+        for (Tag tag : tags) {
+            // 修复：添加userId参数
+            int count = tagMapper.countDocumentsByTag(tag.getId(), userId);
+            tag.setDocumentCount(count);
+        }
+        return tags;
     }
 
-    /**
-     * 为文档添加标签
-     */
     @Transactional
     public boolean addTagToDocument(Long documentId, Long tagId, Long userId) {
-        // 验证标签属于该用户
         Tag tag = tagMapper.selectByIdAndUser(tagId, userId);
         if (tag == null) {
             throw new RuntimeException("标签不存在或无权访问");
         }
 
-        // 检查是否已关联
         if (documentTagMapper.exists(documentId, tagId) > 0) {
             throw new RuntimeException("文档已包含该标签");
         }
@@ -76,12 +105,8 @@ public class TagService {
         return documentTagMapper.insert(documentId, tagId) > 0;
     }
 
-    /**
-     * 从文档移除标签
-     */
     @Transactional
     public boolean removeTagFromDocument(Long documentId, Long tagId, Long userId) {
-        // 验证标签属于该用户
         Tag tag = tagMapper.selectByIdAndUser(tagId, userId);
         if (tag == null) {
             throw new RuntimeException("标签不存在或无权访问");
@@ -90,9 +115,6 @@ public class TagService {
         return documentTagMapper.delete(documentId, tagId) > 0;
     }
 
-    /**
-     * 创建或获取标签（如果已存在）
-     */
     public Tag createOrGetTag(String tagName, Long userId) {
         Tag existingTag = tagMapper.selectByNameAndUser(tagName, userId);
         if (existingTag != null) {
@@ -106,12 +128,8 @@ public class TagService {
         return newTag;
     }
 
-    /**
-     * 批量为文档设置标签（先清除原有标签，再设置新标签）
-     */
     @Transactional
     public boolean setDocumentTags(Long documentId, List<Long> tagIds, Long userId) {
-        // 验证所有标签都属于该用户
         for (Long tagId : tagIds) {
             Tag tag = tagMapper.selectByIdAndUser(tagId, userId);
             if (tag == null) {
@@ -119,10 +137,8 @@ public class TagService {
             }
         }
 
-        // 删除文档的所有现有标签
         documentTagMapper.deleteByDocumentId(documentId);
 
-        // 添加新标签
         for (Long tagId : tagIds) {
             documentTagMapper.insert(documentId, tagId);
         }
@@ -130,20 +146,22 @@ public class TagService {
         return true;
     }
 
-    /**
-     * 获取热门标签（按使用次数排序）
-     */
+    public List<Long> getDocumentIdsByTag(Long tagId, Long userId) {
+        return documentTagMapper.findDocumentIdsByTagIdAndUserId(tagId, userId);
+    }
+
     public List<Tag> getPopularTags(Long userId, int limit) {
         List<Tag> allTags = tagMapper.selectByUserId(userId);
 
-        // 为每个标签计算使用次数
-        for (Tag tag : allTags) {
-            int usageCount = tagMapper.countDocumentsByTag(tag.getId());
-            // 这里可以添加使用次数字段，暂时先返回所有标签
-        }
-
+        // 为每个标签计算使用次数并排序
         return allTags.stream()
+                .peek(tag -> {
+                    // 修复：添加userId参数
+                    int count = tagMapper.countDocumentsByTag(tag.getId(), userId);
+                    tag.setDocumentCount(count);
+                })
+                .sorted((tag1, tag2) -> Integer.compare(tag2.getDocumentCount(), tag1.getDocumentCount()))
                 .limit(limit)
-                .collect(java.util.stream.Collectors.toList());
+                .collect(Collectors.toList());
     }
 }

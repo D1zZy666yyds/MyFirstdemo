@@ -33,6 +33,13 @@ public interface DocumentMapper {
             "FROM documents WHERE id = #{id} AND user_id = #{userId} AND deleted = 0")
     Document selectByIdAndUser(@Param("id") Long id, @Param("userId") Long userId);
 
+    // 添加缺失的 selectById 方法
+    @Select("SELECT id, title, content, content_type as contentType, category_id as categoryId, " +
+            "user_id as userId, created_time as createdTime, updated_time as updatedTime, " +
+            "deleted, deleted_time as deletedTime " +
+            "FROM documents WHERE id = #{id}")
+    Document selectById(@Param("id") Long id);
+
     // 查询用户的所有正常文档
     @Select("SELECT id, title, content, content_type as contentType, category_id as categoryId, " +
             "user_id as userId, created_time as createdTime, updated_time as updatedTime, " +
@@ -85,6 +92,4 @@ public interface DocumentMapper {
     @Select("SELECT id, title, created_time as createdTime, '默认分类' as category " +
             "FROM documents WHERE user_id = #{userId} AND deleted = 0 ORDER BY created_time DESC LIMIT #{limit}")
     List<Map<String, Object>> selectRecentDocuments(@Param("userId") Long userId, @Param("limit") int limit);
-
-
 }

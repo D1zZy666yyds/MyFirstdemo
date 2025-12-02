@@ -6,8 +6,6 @@ import com.dzy666.demo.util.JsonResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -21,16 +19,9 @@ public class CategoryController {
     @PostMapping
     public JsonResult<Category> createCategory(@RequestBody Category category) {
         try {
-            System.out.println("=== 收到创建分类请求 ===");
-            System.out.println("分类名称: " + category.getName());
-            System.out.println("用户ID: " + category.getUserId());
-            System.out.println("父分类ID: " + category.getParentId());
-
             Category created = categoryService.createCategory(category);
             return JsonResult.success("分类创建成功", created);
         } catch (Exception e) {
-            System.err.println("创建分类失败: " + e.getMessage());
-            e.printStackTrace();
             return JsonResult.error(e.getMessage());
         }
     }
@@ -112,19 +103,77 @@ public class CategoryController {
             return JsonResult.error(e.getMessage());
         }
     }
-    // 在 CategoryController 中添加
-    @PostMapping("/public-test")
-    @ResponseBody
-    public Map<String, Object> publicTest(@RequestBody Map<String, Object> requestData) {
-        System.out.println("=== 公开测试接口被调用 ===");
-        System.out.println("接收到的数据: " + requestData);
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("success", true);
-        response.put("message", "公开测试接口正常工作");
-        response.put("timestamp", new Date());
-        response.put("receivedData", requestData);
+    /**
+     * 更新分类顺序
+     */
+    @PutMapping("/order")
+    public JsonResult<Boolean> updateCategoryOrder(@RequestBody Map<String, Object> orderRequest) {
+        try {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> categoryOrders = (List<Map<String, Object>>) orderRequest.get("categoryOrders");
+            Long userId = Long.valueOf(orderRequest.get("userId").toString());
 
-        return response;
+            boolean success = categoryService.updateCategoryOrder(categoryOrders, userId);
+            return JsonResult.success(success ? "分类顺序更新成功" : "更新失败", success);
+        } catch (Exception e) {
+            return JsonResult.error("分类顺序更新失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 移动分类到新的父分类
+     */
+    @PutMapping("/{categoryId}/move")
+    public JsonResult<Category> moveCategory(@PathVariable Long categoryId,
+                                             @RequestParam Long newParentId,
+                                             @RequestParam Long userId) {
+        try {
+            Category movedCategory = categoryService.moveCategory(categoryId, newParentId, userId);
+            return JsonResult.success("分类移动成功", movedCategory);
+        } catch (Exception e) {
+            return JsonResult.error("分类移动失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取分类统计信息
+     */
+    @GetMapping("/stats/{userId}")
+    public JsonResult<Map<String, Object>> getCategoryStats(@PathVariable Long userId) {
+        try {
+            Map<String, Object> stats = categoryService.getCategoryStatistics(userId);
+            return JsonResult.success(stats);
+        } catch (Exception e) {
+            return JsonResult.error("获取分类统计失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取分类下的文档数量统计
+     */
+    @GetMapping("/{categoryId}/documents/count")
+    public JsonResult<Map<String, Object>> getCategoryDocumentCount(@PathVariable Long categoryId,
+                                                                    @RequestParam Long userId) {
+        try {
+            Map<String, Object> countInfo = categoryService.getCategoryDocumentCount(categoryId, userId);
+            return JsonResult.success(countInfo);
+        } catch (Exception e) {
+            return JsonResult.error("获取分类文档数量失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 搜索分类
+     */
+    @GetMapping("/search")
+    public JsonResult<List<Category>> searchCategories(@RequestParam String keyword,
+                                                       @RequestParam Long userId) {
+        try {
+            List<Category> categories = categoryService.searchCategories(keyword, userId);
+            return JsonResult.success(categories);
+        } catch (Exception e) {
+            return JsonResult.error("搜索分类失败: " + e.getMessage());
+        }
     }
 }

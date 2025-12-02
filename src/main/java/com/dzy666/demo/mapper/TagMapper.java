@@ -30,12 +30,20 @@ public interface TagMapper {
     @Delete("DELETE FROM tags WHERE id = #{id} AND user_id = #{userId}")
     int deleteByIdAndUser(@Param("id") Long id, @Param("userId") Long userId);
 
-    @Select("SELECT COUNT(*) FROM document_tags WHERE tag_id = #{tagId}")
-    int countDocumentsByTag(Long tagId);
+    /**
+     * 统计标签关联的文档数量（只统计未删除的文档）
+     * 修复：添加用户ID过滤，确保只统计当前用户的文档
+     */
+    @Select("SELECT COUNT(DISTINCT dt.document_id) " +
+            "FROM document_tags dt " +
+            "INNER JOIN documents d ON dt.document_id = d.id " +
+            "WHERE dt.tag_id = #{tagId} AND d.user_id = #{userId} AND d.deleted = 0")
+    int countDocumentsByTag(@Param("tagId") Long tagId, @Param("userId") Long userId);
 
     @Select("SELECT COUNT(*) FROM tags WHERE user_id = #{userId}")
     int countByUserId(Long userId);
-    // 根据文档ID查询标签 - 修复参数注解
+
+    // 根据文档ID查询标签
     @Select("SELECT t.id, t.name, t.user_id as userId, t.created_time as createdTime " +
             "FROM tags t INNER JOIN document_tags dt ON t.id = dt.tag_id " +
             "WHERE dt.document_id = #{documentId} AND t.user_id = #{userId}")
