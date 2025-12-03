@@ -1,8 +1,10 @@
 package com.dzy666.demo.controller;
 
 import com.dzy666.demo.entity.User;
+import com.dzy666.demo.service.OperationLogService;
 import com.dzy666.demo.service.UserService;
 import com.dzy666.demo.util.JsonResult;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -16,16 +18,30 @@ public class UserController {
     @Autowired
     private UserService userService;
 
+    @Autowired
+    private OperationLogService operationLogService;
+
     /**
      * 用户注册 - 修复版本
      */
     @PostMapping("/register")
-    public JsonResult<User> register(@RequestBody User user) {
+    public JsonResult<User> register(@RequestBody User user, HttpServletRequest request) {
         try {
             User registeredUser = userService.register(user.getUsername(), user.getEmail(), user.getPassword());
             // 清除敏感信息
             registeredUser.setPassword(null);
             registeredUser.setSalt(null);
+
+            // 记录注册操作日志
+            operationLogService.logOperationWithIp(
+                    registeredUser.getId(),
+                    "USER_REGISTER",
+                    "USER",
+                    registeredUser.getId(),
+                    "用户注册成功: " + registeredUser.getUsername(),
+                    request.getRemoteAddr()
+            );
+
             return JsonResult.success("注册成功", registeredUser);
         } catch (Exception e) {
             return JsonResult.error(e.getMessage());
@@ -36,7 +52,7 @@ public class UserController {
      * 用户登录 - 修复版本
      */
     @PostMapping("/login")
-    public JsonResult<User> login(@RequestBody User user, HttpSession session) {
+    public JsonResult<User> login(@RequestBody User user, HttpSession session, HttpServletRequest request) {
         try {
             User loggedInUser = userService.login(user.getUsername(), user.getPassword());
             // 清除敏感信息
@@ -46,6 +62,16 @@ public class UserController {
             // 将用户信息存入session
             session.setAttribute("currentUser", loggedInUser);
             System.out.println("用户登录成功: " + loggedInUser.getUsername() + ", Session ID: " + session.getId());
+
+            // 记录登录操作日志
+            operationLogService.logOperationWithIp(
+                    loggedInUser.getId(),
+                    "USER_LOGIN",
+                    "USER",
+                    loggedInUser.getId(),
+                    "用户登录成功: " + loggedInUser.getUsername(),
+                    request.getRemoteAddr()
+            );
 
             return JsonResult.success("登录成功", loggedInUser);
         } catch (Exception e) {
@@ -85,12 +111,23 @@ public class UserController {
      * 退出登录 - 修复版本
      */
     @PostMapping("/logout")
-    public JsonResult<Boolean> logout(HttpSession session) {
+    public JsonResult<Boolean> logout(HttpSession session, HttpServletRequest request) {
         try {
             User user = (User) session.getAttribute("currentUser");
             if (user != null) {
                 System.out.println("用户退出登录: " + user.getUsername());
                 userService.logout(user.getId());
+
+                // 记录登出操作日志
+                operationLogService.logOperationWithIp(
+                        user.getId(),
+                        "USER_LOGOUT",
+                        "USER",
+                        user.getId(),
+                        "用户退出登录: " + user.getUsername(),
+                        request.getRemoteAddr()
+                );
+
                 session.invalidate();
             }
             return JsonResult.success("登出成功", true);
@@ -129,9 +166,6 @@ public class UserController {
         }
     }
 
-    /**
-     * 修改密码 - 新增接口
-     */
     /**
      * 修改密码 - 新增接口
      */
@@ -181,5 +215,4 @@ public class UserController {
             return JsonResult.error("修改密码失败: " + e.getMessage());
         }
     }
-    // 其他方法保持不变...
 }

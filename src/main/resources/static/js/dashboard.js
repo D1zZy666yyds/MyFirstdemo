@@ -84,87 +84,132 @@ class DashboardManager {
         }
     }
 
-    // 修改 showEmptyRecentDocuments 和 showEmptyRecentActivities 方法
-    showEmptyRecentDocuments() {
-        const container = document.getElementById('recent-docs-list');
-        if (container) {
-            container.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-icon">📄</div>
-                <div class="empty-text">暂无最近文档</div>
-            </div>
-        `;
-        }
-    }
-
-    showEmptyRecentActivities() {
-        const container = document.getElementById('activity-list');
-        if (container) {
-            container.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-icon">📝</div>
-                <div class="empty-text">暂无最近活动</div>
-            </div>
-        `;
-        }
-    }
-
     async loadStats(userId) {
         try {
             console.log('加载统计数据，用户ID:', userId);
 
-            const response = await axios.get('/api/dashboard/stats', {
-                params: { userId: userId },
-                timeout: 10000
+            // 使用现有的API获取数据并计算统计
+            const [documentsRes, categoriesRes, tagsRes] = await Promise.all([
+                axios.get(`/api/document/user/${userId}`),  // 获取用户所有文档
+                axios.get(`/api/category/user/${userId}`),  // 获取用户所有分类
+                axios.get(`/api/tag/user/${userId}`)        // 获取用户所有标签
+            ]);
+
+            console.log('统计数据API响应:', {
+                documents: documentsRes.data,
+                categories: categoriesRes.data,
+                tags: tagsRes.data
             });
 
-            console.log('统计数据响应:', response.data);
+            // 计算统计数据
+            const documents = documentsRes.data.data || [];
+            const categories = categoriesRes.data.data || [];
+            const tags = tagsRes.data.data || [];
 
-            if (response.data && response.data.success) {
-                this.stats = response.data.data || {};
+            // 计算今日新增文档
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const todayDocuments = documents.filter(doc => {
+                const docDate = new Date(doc.createdTime || doc.created_time);
+                docDate.setHours(0, 0, 0, 0);
+                return docDate.getTime() === today.getTime();
+            }).length;
 
-                // 确保有默认值
-                this.stats = {
-                    totalDocuments: this.stats.totalDocuments || 0,
-                    todayDocuments: this.stats.todayDocuments || 0,
-                    totalCategories: this.stats.totalCategories || 0,
-                    totalTags: this.stats.totalTags || 0
-                };
+            // 更新统计对象
+            this.stats = {
+                totalDocuments: documents.length,
+                todayDocuments: todayDocuments,
+                totalCategories: categories.length,
+                totalTags: tags.length
+            };
 
-                this.updateStatsDisplay();
-                console.log('统计数据已更新:', this.stats);
-            } else {
-                throw new Error(response.data?.message || '加载统计数据失败');
-            }
+            this.updateStatsDisplay();
+            console.log('统计数据已更新:', this.stats);
+
         } catch (error) {
             console.error('加载统计数据失败:', error);
-            throw error;
+
+            // 如果API不存在，使用备用方案
+            this.loadStatsFallback();
         }
+    }
+
+    // 备用方案：使用模拟数据
+    loadStatsFallback() {
+        console.log('使用备用方案加载统计数据');
+
+        // 这里可以使用localStorage或默认值
+        this.stats = {
+            totalDocuments: 0,
+            todayDocuments: 0,
+            totalCategories: 0,
+            totalTags: 0
+        };
+
+        this.updateStatsDisplay();
     }
 
     async loadRecentDocuments(userId) {
         try {
             console.log('加载最近文档，用户ID:', userId);
 
-            // 如果没有专门的API，可以从文档列表获取
-            const response = await axios.get('/api/documents/recent', {
+            // 使用正确的API端点
+            const response = await axios.get(`/api/document/user/${userId}/recent`, {
                 params: {
-                    userId: userId,
                     limit: 10
                 },
                 timeout: 10000
             });
 
+            console.log('最近文档响应:', response.data);
+
             if (response.data && response.data.success) {
                 this.recentDocuments = response.data.data || [];
+
+                // 确保按时间倒序排列（最新的在最前面）
+                this.recentDocuments.sort((a, b) => {
+                    const timeA = new Date(a.createdTime || a.created_time || a.updatedTime || a.updated_time).getTime();
+                    const timeB = new Date(b.createdTime || b.created_time || b.updatedTime || b.updated_time).getTime();
+                    return timeB - timeA; // 最新的在前面
+                });
+
                 this.updateRecentDocumentsDisplay();
                 console.log('最近文档已更新:', this.recentDocuments.length);
             } else {
-                // 如果API不存在，显示空状态
+                console.warn('最近文档API返回格式不匹配:', response.data);
+                // 备用方案：从所有文档中获取最近10个
+                await this.loadRecentDocumentsFallback(userId);
+            }
+        } catch (error) {
+            console.warn('加载最近文档失败:', error.message);
+
+            // 备用方案：从所有文档中获取最近10个
+            await this.loadRecentDocumentsFallback(userId);
+        }
+    }
+
+    // 备用方案：从用户所有文档中获取最近文档
+    async loadRecentDocumentsFallback(userId) {
+        try {
+            const response = await axios.get(`/api/document/user/${userId}`);
+            if (response.data && response.data.success) {
+                const allDocuments = response.data.data || [];
+                // 按创建时间倒序排序，取最近10个（最新的在前面）
+                this.recentDocuments = allDocuments
+                    .filter(doc => !doc.deleted) // 排除已删除的文档
+                    .sort((a, b) => {
+                        const timeA = new Date(a.createdTime || a.created_time || a.updatedTime || a.updated_time).getTime();
+                        const timeB = new Date(b.createdTime || b.created_time || b.updatedTime || b.updated_time).getTime();
+                        return timeB - timeA; // 最新的在前面
+                    })
+                    .slice(0, 10);
+
+                this.updateRecentDocumentsDisplay();
+            } else {
                 this.showEmptyRecentDocuments();
             }
         } catch (error) {
-            console.warn('加载最近文档失败，显示空状态:', error.message);
+            console.warn('备用方案也失败:', error.message);
             this.showEmptyRecentDocuments();
         }
     }
@@ -173,24 +218,42 @@ class DashboardManager {
         try {
             console.log('加载最近活动，用户ID:', userId);
 
-            const response = await axios.get('/api/operation-logs/recent', {
-                params: {
-                    userId: userId,
-                    limit: 10
-                },
+            // 使用正确的API端点，只获取当前用户的操作日志
+            const response = await axios.get(`/api/operation-logs/user/${userId}`, {
                 timeout: 10000
             });
 
             if (response.data && response.data.success) {
-                this.recentActivities = response.data.data || [];
+                let activities = response.data.data || [];
+
+                // 筛选只显示登录登出活动（支持多种操作类型）
+                this.recentActivities = activities
+                    .filter(activity => {
+                        const opType = activity.operationType || '';
+                        // 匹配登录相关的操作类型
+                        return opType === 'USER_LOGIN' ||
+                            opType === 'USER_LOGOUT' ||
+                            opType === 'LOGIN' ||
+                            opType === 'LOGOUT' ||
+                            opType === 'USER_REGISTER' ||
+                            opType.includes('LOGIN') ||
+                            opType.includes('LOGOUT');
+                    })
+                    .sort((a, b) => {
+                        const timeA = new Date(a.createdTime || a.created_time).getTime();
+                        const timeB = new Date(b.createdTime || b.created_time).getTime();
+                        return timeB - timeA; // 最新的在前面
+                    })
+                    .slice(0, 10); // 只显示最近10条
+
                 this.updateRecentActivitiesDisplay();
                 console.log('最近活动已更新:', this.recentActivities.length);
             } else {
-                // 如果API不存在，显示空状态
+                console.warn('用户活动API返回格式不匹配');
                 this.showEmptyRecentActivities();
             }
         } catch (error) {
-            console.warn('加载最近活动失败，显示空状态:', error.message);
+            console.warn('加载用户活动失败:', error.message);
             this.showEmptyRecentActivities();
         }
     }
@@ -245,16 +308,22 @@ class DashboardManager {
 
         let html = '<ul class="doc-list-items">';
         this.recentDocuments.forEach(doc => {
+            // 确保文档对象有必要的字段
+            const title = doc.title || '无标题文档';
+            const createdTime = doc.createdTime || doc.created_time || doc.updatedTime || doc.updated_time;
+            const categoryName = doc.categoryName || doc.category?.name || '';
+
             html += `
                 <li class="doc-list-item">
                     <div class="doc-info">
-                        <div class="doc-title">${this.escapeHtml(doc.title || '无标题')}</div>
+                        <div class="doc-title">${this.escapeHtml(title)}</div>
                         <div class="doc-meta">
-                            <span class="doc-time">${this.formatDate(doc.createdTime || doc.created_time)}</span>
-                            ${doc.categoryName ? `<span class="doc-category">${this.escapeHtml(doc.categoryName)}</span>` : ''}
+                            <span class="doc-time">${this.formatDate(createdTime)}</span>
+                            ${categoryName ? `<span class="doc-category">${this.escapeHtml(categoryName)}</span>` : ''}
                         </div>
                     </div>
-                    <button onclick="window.documentManager.viewDocument(${doc.id})" class="btn-small">查看</button>
+                    <button onclick="if(window.documentManager) { window.documentManager.viewDocument(${doc.id}) } else { alert('文档管理器未初始化') }" 
+                            class="btn-small">查看</button>
                 </li>
             `;
         });
@@ -274,12 +343,20 @@ class DashboardManager {
 
         let html = '<ul class="activity-items">';
         this.recentActivities.forEach(activity => {
+            // 确保活动对象有必要的字段
+            const description = activity.description || activity.operationType || '未知操作';
+            const operationType = activity.operationType || 'UNKNOWN';
+            const createdTime = activity.createdTime || activity.created_time;
+
             html += `
                 <li class="activity-item">
-                    <div class="activity-icon">${this.getActivityIcon(activity.operationType)}</div>
+                    <div class="activity-icon">${this.getActivityIcon(operationType)}</div>
                     <div class="activity-content">
-                        <div class="activity-text">${this.escapeHtml(activity.description || '未知操作')}</div>
-                        <div class="activity-time">${this.formatDateTime(activity.createdTime || activity.created_time)}</div>
+                        <div class="activity-text">${this.escapeHtml(description)}</div>
+                        <div class="activity-meta">
+                            <span class="activity-type">${this.getOperationTypeText(operationType)}</span>
+                            <span class="activity-time">${this.formatDateTime(createdTime)}</span>
+                        </div>
                     </div>
                 </li>
             `;
@@ -296,6 +373,7 @@ class DashboardManager {
                 <div class="empty-state">
                     <div class="empty-icon">📄</div>
                     <div class="empty-text">暂无最近文档</div>
+                    <div class="empty-hint">点击"新建文档"开始创建</div>
                 </div>
             `;
         }
@@ -308,6 +386,7 @@ class DashboardManager {
                 <div class="empty-state">
                     <div class="empty-icon">📝</div>
                     <div class="empty-text">暂无最近活动</div>
+                    <div class="empty-hint">您的操作记录将显示在这里</div>
                 </div>
             `;
         }
@@ -361,11 +440,14 @@ class DashboardManager {
     // 工具方法
     getActivityIcon(operationType) {
         const icons = {
+            'USER_LOGIN': '🔐',
+            'USER_LOGOUT': '🚪',
+            'LOGIN': '🔐',
+            'LOGOUT': '🚪',
+            'USER_REGISTER': '📝',
             'CREATE': '📝',
             'UPDATE': '✏️',
             'DELETE': '🗑️',
-            'LOGIN': '🔐',
-            'LOGOUT': '🚪',
             'VIEW': '👁️',
             'SHARE': '🔗',
             'FAVORITE': '❤️'
@@ -373,32 +455,106 @@ class DashboardManager {
         return icons[operationType] || '📌';
     }
 
-    formatDate(dateString) {
-        if (!dateString) return '';
-        const date = new Date(dateString);
-        const now = new Date();
-        const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+    // 操作类型文本映射
+    getOperationTypeText(operationType) {
+        const typeMap = {
+            'USER_LOGIN': '登录',
+            'USER_LOGOUT': '登出',
+            'LOGIN': '登录',
+            'LOGOUT': '登出',
+            'USER_REGISTER': '注册',
+            'CREATE': '创建',
+            'UPDATE': '更新',
+            'DELETE': '删除',
+            'VIEW': '查看',
+            'SHARE': '分享',
+            'FAVORITE': '收藏'
+        };
+        return typeMap[operationType] || operationType;
+    }
 
-        if (diffDays === 0) {
-            return '今天';
-        } else if (diffDays === 1) {
-            return '昨天';
-        } else if (diffDays < 7) {
-            return `${diffDays}天前`;
-        } else {
-            return date.toLocaleDateString('zh-CN');
+    formatDate(dateString) {
+        if (!dateString) return '未知时间';
+
+        try {
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) {
+                return '未知时间';
+            }
+
+            const now = new Date();
+            const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+
+            if (diffDays === 0) {
+                // 今天，显示具体时间
+                return date.toLocaleString('zh-CN', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                });
+            } else if (diffDays === 1) {
+                // 昨天，显示具体时间
+                return `昨天 ${date.toLocaleString('zh-CN', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                })}`;
+            } else if (diffDays < 7) {
+                // 一周内，显示星期几和具体时间
+                const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+                const weekday = weekdays[date.getDay()];
+                return `${weekday} ${date.toLocaleString('zh-CN', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                })}`;
+            } else {
+                // 一周以上，显示完整日期和时间
+                return date.toLocaleString('zh-CN', {
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                }).replace(/\//g, '-');
+            }
+        } catch (error) {
+            return '未知时间';
         }
     }
 
     formatDateTime(dateString) {
-        if (!dateString) return '';
-        const date = new Date(dateString);
-        return date.toLocaleString('zh-CN', {
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+        if (!dateString) return '未知时间';
+
+        try {
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) {
+                return '未知时间';
+            }
+
+            // 显示具体的日期和时间（年月日 时:分）
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            }).replace(/\//g, '-');
+
+            // 或者使用更简洁的格式：MM-DD HH:mm
+            // return date.toLocaleString('zh-CN', {
+            //     month: '2-digit',
+            //     day: '2-digit',
+            //     hour: '2-digit',
+            //     minute: '2-digit',
+            //     hour12: false
+            // }).replace(/\//g, '-');
+
+        } catch (error) {
+            console.warn('格式化时间失败:', error);
+            return '未知时间';
+        }
     }
 
     escapeHtml(text) {
