@@ -4,7 +4,6 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -20,13 +19,15 @@ public interface DashboardMapper {
     /**
      * 获取今日新增文档数
      */
-    @Select("SELECT COUNT(*) FROM documents WHERE user_id = #{userId} AND DATE(created_time) = CURDATE() AND deleted = 0")
+    @Select("SELECT COUNT(*) FROM documents WHERE user_id = #{userId} " +
+            "AND DATE(created_time) = CURDATE() AND deleted = 0")
     int countTodayDocuments(@Param("userId") Long userId);
 
     /**
      * 获取本周新增文档数
      */
-    @Select("SELECT COUNT(*) FROM documents WHERE user_id = #{userId} AND YEARWEEK(created_time) = YEARWEEK(NOW()) AND deleted = 0")
+    @Select("SELECT COUNT(*) FROM documents WHERE user_id = #{userId} " +
+            "AND YEARWEEK(created_time) = YEARWEEK(NOW()) AND deleted = 0")
     int countWeekDocuments(@Param("userId") Long userId);
 
     /**
@@ -50,7 +51,9 @@ public interface DashboardMapper {
     /**
      * 获取最近活动（最新创建的文档）
      */
-    @Select("SELECT title, created_time as createdTime FROM documents WHERE user_id = #{userId} AND deleted = 0 ORDER BY created_time DESC LIMIT 1")
+    @Select("SELECT title, created_time as createdTime " +
+            "FROM documents WHERE user_id = #{userId} AND deleted = 0 " +
+            "ORDER BY created_time DESC LIMIT 1")
     Map<String, Object> getRecentActivity(@Param("userId") Long userId);
 
     /**
@@ -58,7 +61,8 @@ public interface DashboardMapper {
      */
     @Select("SELECT DATE(created_time) as date, COUNT(*) as count " +
             "FROM documents " +
-            "WHERE user_id = #{userId} AND created_time >= DATE_SUB(NOW(), INTERVAL 7 DAY) AND deleted = 0 " +
+            "WHERE user_id = #{userId} AND created_time >= DATE_SUB(NOW(), INTERVAL 7 DAY) " +
+            "AND deleted = 0 " +
             "GROUP BY DATE(created_time) " +
             "ORDER BY date")
     List<Map<String, Object>> getDocumentTrend(@Param("userId") Long userId);
@@ -88,7 +92,7 @@ public interface DashboardMapper {
     List<Map<String, Object>> getPopularTags(@Param("userId") Long userId);
 
     /**
-     * 获取用户学习统计
+     * 获取用户学习统计 - 根据您的数据库调整
      */
     @Select("SELECT " +
             "COUNT(DISTINCT DATE(created_time)) as activeDays, " +
@@ -97,4 +101,52 @@ public interface DashboardMapper {
             "FROM documents " +
             "WHERE user_id = #{userId} AND deleted = 0 AND created_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)")
     Map<String, Object> getLearningStatistics(@Param("userId") Long userId);
+
+    // ============= 新增方法，利用您的丰富数据库 =============
+
+    /**
+     * 获取最近创建的文档（带更多信息）
+     */
+    @Select("SELECT id, title, content_preview as contentPreview, " +
+            "created_time as createdTime, category_id as categoryId " +
+            "FROM documents " +
+            "WHERE user_id = #{userId} AND deleted = 0 " +
+            "ORDER BY created_time DESC " +
+            "LIMIT #{limit}")
+    List<Map<String, Object>> getRecentDocuments(@Param("userId") Long userId,
+                                                 @Param("limit") int limit);
+
+    /**
+     * 获取用户活跃统计
+     */
+    @Select("SELECT " +
+            "(SELECT COUNT(*) FROM documents WHERE user_id = #{userId} AND deleted = 0) as totalDocs, " +
+            "(SELECT COUNT(DISTINCT DATE(created_time)) FROM documents WHERE user_id = #{userId} " +
+            "AND deleted = 0 AND created_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)) as activeDays30, " +
+            "(SELECT COUNT(*) FROM favorites WHERE user_id = #{userId}) as totalFavs, " +
+            "(SELECT MAX(created_time) FROM documents WHERE user_id = #{userId} AND deleted = 0) as lastCreated")
+    Map<String, Object> getUserActivityStats(@Param("userId") Long userId);
+
+    /**
+     * 获取文档大小统计
+     */
+    @Select("SELECT " +
+            "MIN(LENGTH(content)) as minSize, " +
+            "MAX(LENGTH(content)) as maxSize, " +
+            "AVG(LENGTH(content)) as avgSize, " +
+            "SUM(LENGTH(content)) as totalSize " +
+            "FROM documents " +
+            "WHERE user_id = #{userId} AND deleted = 0")
+    Map<String, Object> getDocumentSizeStats(@Param("userId") Long userId);
+
+    /**
+     * 获取最近操作日志
+     */
+    @Select("SELECT operation_type as operationType, target_type as targetType, " +
+            "description, created_time as createdTime " +
+            "FROM operation_logs " +
+            "WHERE user_id = #{userId} " +
+            "ORDER BY created_time DESC " +
+            "LIMIT 10")
+    List<Map<String, Object>> getRecentOperations(@Param("userId") Long userId);
 }

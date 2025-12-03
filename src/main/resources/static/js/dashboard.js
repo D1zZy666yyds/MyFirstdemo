@@ -1,356 +1,403 @@
-// dashboard.js - 修复版本
-
+// dashboard.js - 简化版本，只显示核心功能
 class DashboardManager {
     constructor() {
-        this.stats = {};
+        this.stats = {
+            totalDocuments: 0,
+            todayDocuments: 0,
+            totalCategories: 0,
+            totalTags: 0
+        };
         this.recentDocuments = [];
         this.recentActivities = [];
         this.isLoading = false;
-        this.lastLoaded = null;
-        this.autoRefreshEnabled = false;
-        this.refreshInterval = null;
         this.init();
     }
 
     init() {
         console.log('仪表盘管理器初始化...');
         this.initEventListeners();
-        this.checkAutoRefresh();
+        this.loadDashboardData();
     }
 
     initEventListeners() {
-        // 刷新按钮
-        const refreshBtn = document.getElementById('refresh-dashboard');
-        if (refreshBtn) {
-            refreshBtn.addEventListener('click', () => this.refreshDashboard());
-        }
-
-        // 自动刷新开关
-        const autoRefreshToggle = document.getElementById('auto-refresh-toggle');
-        if (autoRefreshToggle) {
-            autoRefreshToggle.addEventListener('change', (e) => {
-                this.toggleAutoRefresh(e.target.checked);
-                localStorage.setItem('dashboardAutoRefresh', e.target.checked);
+        // 导航到仪表盘时自动刷新
+        const dashboardLink = document.querySelector('a[href="#dashboard"]');
+        if (dashboardLink) {
+            dashboardLink.addEventListener('click', () => {
+                this.loadDashboardData();
             });
-        }
-
-        // 导出按钮
-        const exportBtn = document.getElementById('export-dashboard');
-        if (exportBtn) {
-            exportBtn.addEventListener('click', () => this.exportDashboard());
         }
     }
 
+    // 在 loadDashboardData 方法中，修改加载状态处理
     async loadDashboardData() {
         if (this.isLoading) return;
 
         console.log('加载仪表盘数据...');
-        this.showLoadingState(true);
+        this.isLoading = true;
+
+        // 只在仪表盘工具栏显示加载状态
+        const refreshBtn = document.getElementById('refresh-dashboard');
+        if (refreshBtn) {
+            refreshBtn.disabled = true;
+            refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 加载中...';
+        }
 
         try {
-            this.isLoading = true;
+            // 修复：使用 isAuthenticated() 而不是 isLoggedIn()
+            if (typeof authManager === 'undefined' || !authManager.isAuthenticated()) {
+                console.error('用户未登录或认证管理器未初始化');
+                this.showError('用户未登录，请重新登录');
 
-            // 加载统计数据
-            await this.loadStats();
+                // 延迟重定向，让用户看到错误消息
+                setTimeout(() => {
+                    window.location.href = 'login.html';
+                }, 2000);
+                return;
+            }
 
-            // 如果有其他可用的API，可以在这里添加
-            // await this.loadRecentDocuments();
-            // await this.loadRecentActivity();
+            const userId = authManager.getCurrentUserId();
+            if (!userId) {
+                throw new Error('用户未登录或用户ID无效');
+            }
 
-            this.lastLoaded = new Date();
-            this.updateLastLoadedTime();
+            // 并行加载所有数据
+            await Promise.all([
+                this.loadStats(userId),
+                this.loadRecentDocuments(userId),
+                this.loadRecentActivities(userId)
+            ]);
+
             console.log('仪表盘数据加载完成');
-            this.showSuccessMessage('仪表盘数据已更新');
 
         } catch (error) {
             console.error('加载仪表盘数据失败:', error);
-            this.showError('加载仪表盘数据失败: ' + error.message);
+            this.showError('加载数据失败: ' + error.message);
         } finally {
             this.isLoading = false;
-            this.showLoadingState(false);
+
+            // 恢复刷新按钮状态
+            if (refreshBtn) {
+                refreshBtn.disabled = false;
+                refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i> 刷新';
+            }
         }
     }
 
-    async loadStats() {
+    // 修改 showEmptyRecentDocuments 和 showEmptyRecentActivities 方法
+    showEmptyRecentDocuments() {
+        const container = document.getElementById('recent-docs-list');
+        if (container) {
+            container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">📄</div>
+                <div class="empty-text">暂无最近文档</div>
+            </div>
+        `;
+        }
+    }
+
+    showEmptyRecentActivities() {
+        const container = document.getElementById('activity-list');
+        if (container) {
+            container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">📝</div>
+                <div class="empty-text">暂无最近活动</div>
+            </div>
+        `;
+        }
+    }
+
+    async loadStats(userId) {
         try {
-            // 检查 authManager
-            if (typeof authManager === 'undefined') {
-                console.error('authManager 未定义');
-                throw new Error('认证服务不可用');
-            }
+            console.log('加载统计数据，用户ID:', userId);
 
-            // 获取用户信息，不仅仅是ID
-            console.log('authManager 对象:', authManager);
-            console.log('当前登录状态:', authManager.isLoggedIn());
-
-            const userId = authManager.getCurrentUserId();
-            console.log('获取的用户ID (类型:', typeof userId, '):', userId); // 调试日志
-
-            if (!userId) {
-                console.error('用户ID为空，检查登录状态');
-                // 尝试其他方式获取用户ID
-                const currentUser = authManager.getCurrentUser();
-                console.log('当前用户对象:', currentUser);
-
-                if (currentUser && currentUser.id) {
-                    userId = currentUser.id;
-                    console.log('从用户对象获取的ID:', userId);
-                } else {
-                    throw new Error('用户未登录或用户ID无效');
-                }
-            }
-
-            // 确保userId是数字类型
-            const numericUserId = Number(userId);
-            if (isNaN(numericUserId) || numericUserId <= 0) {
-                console.error('无效的用户ID格式:', userId);
-                throw new Error('无效的用户ID');
-            }
-
-            console.log('加载统计数据，用户ID:', numericUserId);
-
-            // 调用API
             const response = await axios.get('/api/dashboard/stats', {
-                params: { userId: numericUserId },
+                params: { userId: userId },
                 timeout: 10000
             });
 
-            console.log('API响应状态:', response.status);
-            console.log('API响应数据:', response.data);
-
-            // 查看返回的数据结构
-            if (response.data) {
-                console.log('response.data.success:', response.data.success);
-                console.log('response.data.message:', response.data.message);
-                console.log('response.data.data:', response.data.data);
-            }
+            console.log('统计数据响应:', response.data);
 
             if (response.data && response.data.success) {
                 this.stats = response.data.data || {};
-                console.log('解析后的统计数据:', this.stats); // 调试日志
 
-                // 应急处理：如果统计数据没有值，检查是否有不同的字段名
-                if (this.stats.totalDocuments === undefined) {
-                    console.warn('API返回的数据结构可能不同:', this.stats);
-                    // 遍历所有键查看实际返回的内容
-                    Object.keys(this.stats).forEach(key => {
-                        console.log(`统计字段 ${key}:`, this.stats[key]);
-                    });
-                }
+                // 确保有默认值
+                this.stats = {
+                    totalDocuments: this.stats.totalDocuments || 0,
+                    todayDocuments: this.stats.todayDocuments || 0,
+                    totalCategories: this.stats.totalCategories || 0,
+                    totalTags: this.stats.totalTags || 0
+                };
 
                 this.updateStatsDisplay();
-                this.updateStatsCards();
-                console.log('统计数据加载完成:', this.stats);
+                console.log('统计数据已更新:', this.stats);
             } else {
-                const errorMsg = response.data?.message || '加载统计数据失败';
-                console.error('API返回失败:', errorMsg);
-                this.showError('获取统计信息失败: ' + errorMsg);
+                throw new Error(response.data?.message || '加载统计数据失败');
             }
         } catch (error) {
             console.error('加载统计数据失败:', error);
-
-            // 更详细的错误信息
-            if (error.response) {
-                console.error('错误响应状态:', error.response.status);
-                console.error('错误响应数据:', error.response.data);
-            } else if (error.request) {
-                console.error('无响应:', error.request);
-            }
-
             throw error;
         }
     }
 
-    updateStatsDisplay() {
-        const stats = this.stats;
+    async loadRecentDocuments(userId) {
+        try {
+            console.log('加载最近文档，用户ID:', userId);
 
-        console.log('开始更新统计显示'); // 调试日志
-        console.log('stats对象:', stats); // 调试日志
-        console.log('totalDocuments:', stats.totalDocuments); // 调试日志
-        console.log('todayDocuments:', stats.todayDocuments); // 调试日志
-        console.log('totalCategories:', stats.totalCategories); // 调试日志
-        console.log('totalTags:', stats.totalTags); // 调试日志
+            // 如果没有专门的API，可以从文档列表获取
+            const response = await axios.get('/api/documents/recent', {
+                params: {
+                    userId: userId,
+                    limit: 10
+                },
+                timeout: 10000
+            });
 
-        const updateStat = (elementId, value, suffix = '') => {
-            const element = document.getElementById(elementId);
-            if (element) {
-                // 确保value是有效的数字
-                let displayValue;
-                if (value === undefined || value === null) {
-                    displayValue = 0;
-                    console.warn(`${elementId}: 值为undefined或null，使用0`);
-                } else {
-                    displayValue = Number(value);
-                    if (isNaN(displayValue)) {
-                        displayValue = 0;
-                        console.warn(`${elementId}: 值不是有效数字，使用0`);
-                    }
-                }
-
-                element.textContent = displayValue + suffix;
-                console.log(`更新 ${elementId}: ${displayValue}${suffix}`); // 调试日志
-
-                // 添加动画效果
-                element.classList.remove('updated');
-                setTimeout(() => {
-                    element.classList.add('updated');
-                }, 10);
+            if (response.data && response.data.success) {
+                this.recentDocuments = response.data.data || [];
+                this.updateRecentDocumentsDisplay();
+                console.log('最近文档已更新:', this.recentDocuments.length);
             } else {
-                console.error(`元素 ${elementId} 未找到`);
+                // 如果API不存在，显示空状态
+                this.showEmptyRecentDocuments();
             }
-        };
-
-        // 更新主要统计卡片
-        // 注意：使用驼峰式属性名，因为后端返回的是驼峰式
-        updateStat('total-documents', stats.totalDocuments);
-        updateStat('today-documents', stats.todayDocuments);
-        updateStat('total-categories', stats.totalCategories);
-        updateStat('total-tags', stats.totalTags);
-
-        // 如果有额外统计，也更新
-        if (stats.weekDocuments !== undefined) {
-            updateStat('week-documents', stats.weekDocuments);
+        } catch (error) {
+            console.warn('加载最近文档失败，显示空状态:', error.message);
+            this.showEmptyRecentDocuments();
         }
-        if (stats.totalFavorites !== undefined) {
-            updateStat('total-favorites', stats.totalFavorites);
-        }
-
-        console.log('统计显示更新完成'); // 调试日志
     }
 
-    updateStatsCards() {
-        const stats = this.stats;
-        const cards = document.querySelectorAll('.stat-card');
+    async loadRecentActivities(userId) {
+        try {
+            console.log('加载最近活动，用户ID:', userId);
 
-        cards.forEach(card => {
-            const valueElement = card.querySelector('.stat-value');
-            const trendElement = card.querySelector('.stat-trend');
+            const response = await axios.get('/api/operation-logs/recent', {
+                params: {
+                    userId: userId,
+                    limit: 10
+                },
+                timeout: 10000
+            });
 
-            if (valueElement && trendElement) {
-                const statId = card.dataset.stat;
-                const value = stats[statId] || 0;
-
-                // 如果有昨天数据对比，显示趋势
-                const yesterdayKey = `yesterday${statId.charAt(0).toUpperCase() + statId.slice(1)}`;
-                if (stats[yesterdayKey] !== undefined) {
-                    const yesterdayValue = stats[yesterdayKey] || 0;
-                    const trend = value - yesterdayValue;
-
-                    trendElement.textContent = trend >= 0 ? `+${trend}` : trend;
-                    trendElement.className = `stat-trend ${trend >= 0 ? 'positive' : 'negative'}`;
-                }
+            if (response.data && response.data.success) {
+                this.recentActivities = response.data.data || [];
+                this.updateRecentActivitiesDisplay();
+                console.log('最近活动已更新:', this.recentActivities.length);
+            } else {
+                // 如果API不存在，显示空状态
+                this.showEmptyRecentActivities();
             }
+        } catch (error) {
+            console.warn('加载最近活动失败，显示空状态:', error.message);
+            this.showEmptyRecentActivities();
+        }
+    }
+
+    updateStatsDisplay() {
+        console.log('更新统计显示:', this.stats);
+
+        // 更新统计数字
+        this.updateElementText('total-documents', this.stats.totalDocuments || 0);
+        this.updateElementText('today-documents', this.stats.todayDocuments || 0);
+        this.updateElementText('total-categories', this.stats.totalCategories || 0);
+        this.updateElementText('total-tags', this.stats.totalTags || 0);
+
+        // 添加动画效果
+        this.animateStats();
+    }
+
+    updateElementText(elementId, value) {
+        const element = document.getElementById(elementId);
+        if (element) {
+            // 如果是数字，确保是整数
+            if (typeof value === 'number') {
+                element.textContent = Math.round(value);
+            } else {
+                element.textContent = value || '0';
+            }
+        } else {
+            console.warn(`元素 ${elementId} 未找到`);
+        }
+    }
+
+    animateStats() {
+        // 为统计数字添加简单的动画
+        const statNumbers = document.querySelectorAll('.stat-number');
+        statNumbers.forEach((element, index) => {
+            element.style.opacity = '0.7';
+            setTimeout(() => {
+                element.style.transition = 'opacity 0.3s ease';
+                element.style.opacity = '1';
+            }, index * 100);
         });
     }
 
-    refreshDashboard() {
-        console.log('手动刷新仪表盘...');
-        this.loadDashboardData();
+    updateRecentDocumentsDisplay() {
+        const container = document.getElementById('recent-docs-list');
+        if (!container) return;
+
+        if (this.recentDocuments.length === 0) {
+            this.showEmptyRecentDocuments();
+            return;
+        }
+
+        let html = '<ul class="doc-list-items">';
+        this.recentDocuments.forEach(doc => {
+            html += `
+                <li class="doc-list-item">
+                    <div class="doc-info">
+                        <div class="doc-title">${this.escapeHtml(doc.title || '无标题')}</div>
+                        <div class="doc-meta">
+                            <span class="doc-time">${this.formatDate(doc.createdTime || doc.created_time)}</span>
+                            ${doc.categoryName ? `<span class="doc-category">${this.escapeHtml(doc.categoryName)}</span>` : ''}
+                        </div>
+                    </div>
+                    <button onclick="window.documentManager.viewDocument(${doc.id})" class="btn-small">查看</button>
+                </li>
+            `;
+        });
+        html += '</ul>';
+
+        container.innerHTML = html;
     }
 
-    toggleAutoRefresh(enabled) {
-        this.autoRefreshEnabled = enabled;
+    updateRecentActivitiesDisplay() {
+        const container = document.getElementById('activity-list');
+        if (!container) return;
 
-        if (enabled) {
-            this.refreshInterval = setInterval(() => {
-                this.refreshDashboard();
-            }, 60000);
-            console.log('自动刷新已开启');
-            this.showSuccessMessage('自动刷新已开启');
-        } else {
-            if (this.refreshInterval) {
-                clearInterval(this.refreshInterval);
-                this.refreshInterval = null;
-            }
-            console.log('自动刷新已关闭');
-            this.showSuccessMessage('自动刷新已关闭');
+        if (this.recentActivities.length === 0) {
+            this.showEmptyRecentActivities();
+            return;
+        }
+
+        let html = '<ul class="activity-items">';
+        this.recentActivities.forEach(activity => {
+            html += `
+                <li class="activity-item">
+                    <div class="activity-icon">${this.getActivityIcon(activity.operationType)}</div>
+                    <div class="activity-content">
+                        <div class="activity-text">${this.escapeHtml(activity.description || '未知操作')}</div>
+                        <div class="activity-time">${this.formatDateTime(activity.createdTime || activity.created_time)}</div>
+                    </div>
+                </li>
+            `;
+        });
+        html += '</ul>';
+
+        container.innerHTML = html;
+    }
+
+    showEmptyRecentDocuments() {
+        const container = document.getElementById('recent-docs-list');
+        if (container) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">📄</div>
+                    <div class="empty-text">暂无最近文档</div>
+                </div>
+            `;
         }
     }
 
-    checkAutoRefresh() {
-        const autoRefreshSetting = localStorage.getItem('dashboardAutoRefresh');
-        if (autoRefreshSetting === 'true') {
-            const toggle = document.getElementById('auto-refresh-toggle');
-            if (toggle) {
-                toggle.checked = true;
-                this.toggleAutoRefresh(true);
-            }
+    showEmptyRecentActivities() {
+        const container = document.getElementById('activity-list');
+        if (container) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">📝</div>
+                    <div class="empty-text">暂无最近活动</div>
+                </div>
+            `;
         }
     }
 
     showLoadingState(show) {
-        const loadingOverlay = document.getElementById('dashboard-loading');
-        const refreshBtn = document.getElementById('refresh-dashboard');
-
-        if (loadingOverlay) {
-            loadingOverlay.style.display = show ? 'flex' : 'none';
-        }
-
-        if (refreshBtn) {
-            refreshBtn.disabled = show;
-            refreshBtn.innerHTML = show ?
-                '<span class="loading-spinner-sm"></span> 刷新中...' :
-                '🔄 刷新';
-        }
-    }
-
-    showEmptyState(containerId, message = '暂无数据') {
-        const container = document.getElementById(containerId);
-        if (container) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-icon">📊</div>
-                    <div class="empty-text">${this.escapeHtml(message)}</div>
-                </div>
-            `;
-        }
-    }
-
-    showSuccessMessage(message) {
-        const messageContainer = document.getElementById('dashboard-message');
-        if (messageContainer) {
-            messageContainer.innerHTML = `
-                <div class="message success">
-                    <span>✅ ${this.escapeHtml(message)}</span>
-                </div>
-            `;
-            setTimeout(() => {
-                messageContainer.innerHTML = '';
-            }, 3000);
+        const dashboardPage = document.getElementById('dashboard-page');
+        if (dashboardPage) {
+            if (show) {
+                dashboardPage.classList.add('loading');
+            } else {
+                dashboardPage.classList.remove('loading');
+            }
         }
     }
 
     showError(message) {
         console.error('仪表盘错误:', message);
-        const messageContainer = document.getElementById('dashboard-message');
-        if (messageContainer) {
-            messageContainer.innerHTML = `
-                <div class="message error">
-                    <span>❌ ${this.escapeHtml(message)}</span>
-                    <button onclick="dashboardManager.retryLoad()" class="retry-btn">重试</button>
-                </div>
-            `;
-        }
-    }
 
-    retryLoad() {
-        console.log('重试加载仪表盘数据...');
-        this.loadDashboardData();
+        // 可以在顶部显示错误消息
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'global-error';
+        errorDiv.innerHTML = `
+            <div class="error-content">
+                <span class="error-icon">❌</span>
+                <span class="error-text">${this.escapeHtml(message)}</span>
+                <button onclick="this.parentElement.parentElement.remove()" class="error-close">×</button>
+            </div>
+        `;
+
+        // 插入到页面顶部
+        const app = document.getElementById('app');
+        if (app && app.firstChild) {
+            app.insertBefore(errorDiv, app.firstChild);
+
+            // 5秒后自动移除
+            setTimeout(() => {
+                if (errorDiv.parentNode) {
+                    errorDiv.remove();
+                }
+            }, 5000);
+        }
     }
 
     updateLastLoadedTime() {
-        const timeElement = document.getElementById('last-loaded-time');
-        if (timeElement && this.lastLoaded) {
-            timeElement.textContent = `最后更新: ${this.formatTime(this.lastLoaded)}`;
-        }
+        const now = new Date();
+        console.log('最后更新时间:', now.toLocaleString());
+        // 可以添加一个显示最后更新时间的小元素
     }
 
     // 工具方法
-    formatTime(date) {
-        return date.toLocaleTimeString('zh-CN', {
+    getActivityIcon(operationType) {
+        const icons = {
+            'CREATE': '📝',
+            'UPDATE': '✏️',
+            'DELETE': '🗑️',
+            'LOGIN': '🔐',
+            'LOGOUT': '🚪',
+            'VIEW': '👁️',
+            'SHARE': '🔗',
+            'FAVORITE': '❤️'
+        };
+        return icons[operationType] || '📌';
+    }
+
+    formatDate(dateString) {
+        if (!dateString) return '';
+        const date = new Date(dateString);
+        const now = new Date();
+        const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+
+        if (diffDays === 0) {
+            return '今天';
+        } else if (diffDays === 1) {
+            return '昨天';
+        } else if (diffDays < 7) {
+            return `${diffDays}天前`;
+        } else {
+            return date.toLocaleDateString('zh-CN');
+        }
+    }
+
+    formatDateTime(dateString) {
+        if (!dateString) return '';
+        const date = new Date(dateString);
+        return date.toLocaleString('zh-CN', {
+            month: '2-digit',
+            day: '2-digit',
             hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
+            minute: '2-digit'
         });
     }
 
@@ -361,29 +408,10 @@ class DashboardManager {
         return div.innerHTML;
     }
 
-    exportDashboard() {
-        try {
-            const dashboardData = {
-                stats: this.stats,
-                recentDocuments: this.recentDocuments,
-                recentActivities: this.recentActivities,
-                exportedAt: new Date().toISOString()
-            };
-
-            const dataStr = JSON.stringify(dashboardData, null, 2);
-            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-            const exportFileDefaultName = `dashboard-export-${new Date().toISOString().split('T')[0]}.json`;
-
-            const linkElement = document.createElement('a');
-            linkElement.setAttribute('href', dataUri);
-            linkElement.setAttribute('download', exportFileDefaultName);
-            linkElement.click();
-
-            this.showSuccessMessage('仪表盘数据已导出');
-        } catch (error) {
-            console.error('导出仪表盘失败:', error);
-            this.showError('导出失败: ' + error.message);
-        }
+    // 刷新方法（公开）
+    refresh() {
+        console.log('手动刷新仪表盘...');
+        this.loadDashboardData();
     }
 }
 
@@ -391,17 +419,39 @@ class DashboardManager {
 document.addEventListener('DOMContentLoaded', function() {
     console.log('仪表盘页面加载完成');
 
-    // 检查用户是否已登录
-    if (typeof authManager !== 'undefined' && authManager.isLoggedIn()) {
-        window.dashboardManager = new DashboardManager();
-        dashboardManager.loadDashboardData();
+    // 修复：使用 isAuthenticated() 而不是 isLoggedIn()
+    // 添加延迟确保 authManager 已完全初始化
+    setTimeout(() => {
+        if (typeof authManager !== 'undefined' && authManager.isAuthenticated && authManager.isAuthenticated()) {
+            console.log('用户已认证，初始化仪表盘管理器');
+            window.dashboardManager = new DashboardManager();
 
-        const exportBtn = document.getElementById('export-dashboard');
-        if (exportBtn) {
-            exportBtn.addEventListener('click', () => dashboardManager.exportDashboard());
+            // 监听页面切换
+            const navItems = document.querySelectorAll('.nav-item');
+            navItems.forEach(item => {
+                item.addEventListener('click', function(e) {
+                    if (this.getAttribute('href') === '#dashboard') {
+                        // 切换到仪表盘时刷新数据
+                        setTimeout(() => {
+                            if (window.dashboardManager) {
+                                window.dashboardManager.refresh();
+                            }
+                        }, 100);
+                    }
+                });
+            });
+        } else {
+            console.error('用户未登录或认证管理器未正确初始化');
+
+            // 检查当前页面，如果不是登录页则重定向
+            const currentPage = window.location.pathname.split('/').pop();
+            if (currentPage !== 'login.html') {
+                console.log('用户未登录，准备重定向到登录页');
+                // 延迟重定向，以便显示错误消息
+                setTimeout(() => {
+                    window.location.href = 'login.html';
+                }, 1500);
+            }
         }
-    } else {
-        console.error('用户未登录，重定向到登录页');
-        window.location.href = 'login.html';
-    }
+    }, 300); // 延迟300ms确保所有脚本加载完成
 });

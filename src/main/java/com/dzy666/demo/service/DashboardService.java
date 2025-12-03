@@ -1,232 +1,270 @@
 package com.dzy666.demo.service;
 
 import com.dzy666.demo.mapper.DashboardMapper;
-import com.dzy666.demo.mapper.DocumentMapper;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @Service
+@RequiredArgsConstructor
 public class DashboardService {
 
-    @Autowired
-    private DashboardMapper dashboardMapper;
+    private final DashboardMapper dashboardMapper;
+
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     /**
-     * 获取仪表盘统计数据 - 匹配dashboard.js的需求
+     * 获取完整的仪表盘统计数据
      */
     public Map<String, Object> getDashboardStats(Long userId) {
-        Map<String, Object> stats = new HashMap<>();
+        Map<String, Object> stats = new LinkedHashMap<>();
 
-        try {
-            // 基础统计 - dashboard.js需要的4个核心数据
-            stats.put("totalDocuments", dashboardMapper.countDocumentsByUserId(userId));
-            stats.put("todayDocuments", dashboardMapper.countTodayDocuments(userId));
-            stats.put("totalCategories", dashboardMapper.countCategoriesByUserId(userId));
-            stats.put("totalTags", dashboardMapper.countTagsByUserId(userId));
+        // 基础统计数据
+        stats.put("totalDocuments", dashboardMapper.countDocumentsByUserId(userId));
+        stats.put("todayDocuments", dashboardMapper.countTodayDocuments(userId));
+        stats.put("weekDocuments", dashboardMapper.countWeekDocuments(userId));
+        stats.put("totalCategories", dashboardMapper.countCategoriesByUserId(userId));
+        stats.put("totalTags", dashboardMapper.countTagsByUserId(userId));
+        stats.put("totalFavorites", dashboardMapper.countFavoritesByUserId(userId));
 
-            // 周文档数（可选）
-            stats.put("weekDocuments", dashboardMapper.countWeekDocuments(userId));
+        // 最近活动
+        Map<String, Object> recentActivity = dashboardMapper.getRecentActivity(userId);
+        stats.put("recentActivity", recentActivity != null ? recentActivity : new HashMap<>());
 
-            // 收藏统计（可选）
-            stats.put("totalFavorites", dashboardMapper.countFavoritesByUserId(userId));
+        // 文档趋势（最近7天）
+        List<Map<String, Object>> documentTrend = dashboardMapper.getDocumentTrend(userId);
+        stats.put("documentTrend", formatTrendData(documentTrend));
 
-            // 最近活动 - dashboard.js需要这个字段
-            Map<String, Object> recentActivity = dashboardMapper.getRecentActivity(userId);
-            if (recentActivity != null && !recentActivity.isEmpty()) {
-                String title = (String) recentActivity.get("title");
-                LocalDateTime createdTime = (LocalDateTime) recentActivity.get("createdTime");
-                String activity = String.format("创建了文档: %s", title);
-                stats.put("recentActivity", activity);
-                // 添加原始数据供前端使用
-                stats.put("recentActivityDetail", recentActivity);
-            } else {
-                stats.put("recentActivity", "暂无活动");
-                stats.put("recentActivityDetail", null);
-            }
+        // 分类分布
+        List<Map<String, Object>> categoryDistribution = dashboardMapper.getCategoryDocumentDistribution(userId);
+        stats.put("categoryDistribution", formatCategoryDistribution(categoryDistribution));
 
-            // 学习进度（基于活跃天数）
-            Map<String, Object> learningStats = dashboardMapper.getLearningStatistics(userId);
-            if (learningStats != null && learningStats.get("activeDays") != null) {
-                Object activeDaysObj = learningStats.get("activeDays");
-                int activeDays = 0;
-                if (activeDaysObj instanceof Long) {
-                    activeDays = ((Long) activeDaysObj).intValue();
-                } else if (activeDaysObj instanceof Integer) {
-                    activeDays = (Integer) activeDaysObj;
-                } else if (activeDaysObj instanceof Number) {
-                    activeDays = ((Number) activeDaysObj).intValue();
-                }
+        // 热门标签
+        List<Map<String, Object>> popularTags = dashboardMapper.getPopularTags(userId);
+        stats.put("popularTags", formatPopularTags(popularTags));
 
-                int learningProgress = Math.min(activeDays * 3, 100); // 简单计算进度
-                stats.put("learningProgress", learningProgress);
-                stats.put("activeDays", activeDays);
-            } else {
-                stats.put("learningProgress", 0);
-                stats.put("activeDays", 0);
-            }
+        // 学习统计
+        Map<String, Object> learningStats = dashboardMapper.getLearningStatistics(userId);
+        stats.put("learningStats", learningStats != null ? learningStats : new HashMap<>());
 
-            // 系统信息
-            stats.put("lastUpdate", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-            stats.put("systemStatus", "正常");
-            stats.put("dataTimestamp", System.currentTimeMillis());
+        // 最近文档（最多5篇）
+        List<Map<String, Object>> recentDocuments = dashboardMapper.getRecentDocuments(userId, 5);
+        stats.put("recentDocuments", formatRecentDocuments(recentDocuments));
 
-        } catch (Exception e) {
-            // 如果出现异常，返回模拟数据
-            return getMockDashboardStats();
-        }
+        // 用户活跃统计
+        Map<String, Object> userActivity = dashboardMapper.getUserActivityStats(userId);
+        stats.put("userActivity", userActivity != null ? userActivity : new HashMap<>());
+
+        // 文档大小统计
+        Map<String, Object> sizeStats = dashboardMapper.getDocumentSizeStats(userId);
+        stats.put("sizeStats", sizeStats != null ? sizeStats : new HashMap<>());
+
+        // 最近操作
+        List<Map<String, Object>> recentOperations = dashboardMapper.getRecentOperations(userId);
+        stats.put("recentOperations", formatRecentOperations(recentOperations));
+
+        // 时间信息
+        stats.put("currentDate", LocalDate.now().format(DATE_FORMATTER));
+        stats.put("currentTime", LocalDateTime.now().toString());
+        stats.put("serverTime", System.currentTimeMillis());
 
         return stats;
     }
 
     /**
-     * 获取快速统计数据 - 简化版，只返回核心数据
+     * 获取快速统计数据
      */
     public Map<String, Object> getQuickStats(Long userId) {
-        try {
-            Map<String, Object> quickStats = new HashMap<>();
+        Map<String, Object> quickStats = new HashMap<>();
 
-            quickStats.put("documents", dashboardMapper.countDocumentsByUserId(userId));
-            quickStats.put("categories", dashboardMapper.countCategoriesByUserId(userId));
-            quickStats.put("tags", dashboardMapper.countTagsByUserId(userId));
-            quickStats.put("favorites", dashboardMapper.countFavoritesByUserId(userId));
+        quickStats.put("totalDocuments", dashboardMapper.countDocumentsByUserId(userId));
+        quickStats.put("todayDocuments", dashboardMapper.countTodayDocuments(userId));
+        quickStats.put("totalCategories", dashboardMapper.countCategoriesByUserId(userId));
+        quickStats.put("totalTags", dashboardMapper.countTagsByUserId(userId));
+        quickStats.put("totalFavorites", dashboardMapper.countFavoritesByUserId(userId));
 
-            return quickStats;
-        } catch (Exception e) {
-            // 返回模拟数据
-            return Map.of(
-                    "documents", 15,
-                    "categories", 5,
-                    "tags", 12,
-                    "favorites", 7
-            );
-        }
+        return quickStats;
     }
 
     /**
-     * 获取学习分析数据
+     * 获取文档创建趋势（按日期范围）
      */
-    public Map<String, Object> getLearningAnalysis(Long userId) {
-        Map<String, Object> analysis = new HashMap<>();
+    public Map<String, Object> getDocumentTrendByRange(Long userId, String startDate, String endDate) {
+        Map<String, Object> result = new HashMap<>();
 
-        try {
-            Map<String, Object> learningStats = dashboardMapper.getLearningStatistics(userId);
+        result.put("userId", userId);
+        result.put("startDate", startDate);
+        result.put("endDate", endDate);
 
-            if (learningStats != null) {
-                analysis.put("activeDays", learningStats.getOrDefault("activeDays", 0));
-                analysis.put("avgDocumentLength", learningStats.getOrDefault("avgDocumentLength", 0));
-                Object lastStudyTime = learningStats.getOrDefault("lastStudyTime", "暂无数据");
-                if (lastStudyTime instanceof LocalDateTime) {
-                    analysis.put("lastStudyTime", ((LocalDateTime) lastStudyTime).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-                } else {
-                    analysis.put("lastStudyTime", lastStudyTime.toString());
+        // 这里可以扩展实现按日期范围查询趋势
+        // 暂时返回最近7天趋势
+        List<Map<String, Object>> trendData = dashboardMapper.getDocumentTrend(userId);
+        result.put("trendData", formatTrendData(trendData));
+
+        // 计算统计信息
+        int totalDocs = 0;
+        List<String> dates = new ArrayList<>();
+        List<Integer> counts = new ArrayList<>();
+
+        for (Map<String, Object> item : trendData) {
+            totalDocs += Integer.parseInt(item.get("count").toString());
+            dates.add(item.get("date").toString());
+            counts.add(Integer.parseInt(item.get("count").toString()));
+        }
+
+        result.put("totalDocsInPeriod", totalDocs);
+        result.put("avgDocsPerDay", trendData.isEmpty() ? 0 : totalDocs / trendData.size());
+        result.put("maxDocsPerDay", counts.isEmpty() ? 0 : Collections.max(counts));
+        result.put("dates", dates);
+        result.put("counts", counts);
+
+        return result;
+    }
+
+    // ============= 数据格式化方法 =============
+
+    private Map<String, Object> formatTrendData(List<Map<String, Object>> trendData) {
+        Map<String, Object> formatted = new HashMap<>();
+
+        List<String> dates = new ArrayList<>();
+        List<Integer> counts = new ArrayList<>();
+
+        if (trendData != null && !trendData.isEmpty()) {
+            for (Map<String, Object> item : trendData) {
+                dates.add(item.get("date").toString());
+                counts.add(Integer.parseInt(item.get("count").toString()));
+            }
+        }
+
+        formatted.put("dates", dates);
+        formatted.put("counts", counts);
+        formatted.put("total", counts.stream().mapToInt(Integer::intValue).sum());
+
+        return formatted;
+    }
+
+    private List<Map<String, Object>> formatCategoryDistribution(List<Map<String, Object>> distribution) {
+        if (distribution == null || distribution.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // 计算总数
+        int total = distribution.stream()
+                .mapToInt(item -> Integer.parseInt(item.get("documentCount").toString()))
+                .sum();
+
+        // 添加百分比
+        distribution.forEach(item -> {
+            int count = Integer.parseInt(item.get("documentCount").toString());
+            double percentage = total > 0 ? (count * 100.0) / total : 0;
+            item.put("percentage", String.format("%.1f", percentage));
+        });
+
+        return distribution;
+    }
+
+    private List<Map<String, Object>> formatPopularTags(List<Map<String, Object>> tags) {
+        if (tags == null || tags.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // 排序并添加排名
+        tags.sort((a, b) -> {
+            int countA = Integer.parseInt(a.get("usageCount").toString());
+            int countB = Integer.parseInt(b.get("usageCount").toString());
+            return Integer.compare(countB, countA);
+        });
+
+        for (int i = 0; i < tags.size(); i++) {
+            tags.get(i).put("rank", i + 1);
+        }
+
+        return tags;
+    }
+
+    private List<Map<String, Object>> formatRecentDocuments(List<Map<String, Object>> documents) {
+        if (documents == null || documents.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        documents.forEach(doc -> {
+            // 格式化日期
+            if (doc.get("createdTime") != null) {
+                try {
+                    LocalDateTime dateTime = (LocalDateTime) doc.get("createdTime");
+                    doc.put("formattedDate", dateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+                    doc.put("relativeTime", formatRelativeTime(dateTime));
+                } catch (Exception e) {
+                    doc.put("formattedDate", doc.get("createdTime").toString());
+                    doc.put("relativeTime", "未知时间");
                 }
-
-                // 计算学习效率
-                Object avgLengthObj = learningStats.getOrDefault("avgDocumentLength", 0L);
-                long avgLength = 0L;
-                if (avgLengthObj instanceof Long) {
-                    avgLength = (Long) avgLengthObj;
-                } else if (avgLengthObj instanceof Integer) {
-                    avgLength = ((Integer) avgLengthObj).longValue();
-                } else if (avgLengthObj instanceof Double) {
-                    avgLength = ((Double) avgLengthObj).longValue();
-                }
-
-                int efficiencyScore = Math.min((int) (avgLength / 10), 100);
-                analysis.put("learningEfficiency", efficiencyScore);
             }
 
-            // 文档趋势
-            List<Map<String, Object>> trend = dashboardMapper.getDocumentTrend(userId);
-            analysis.put("weeklyTrend", trend);
+            // 截取内容预览
+            if (doc.get("contentPreview") != null) {
+                String preview = doc.get("contentPreview").toString();
+                if (preview.length() > 100) {
+                    doc.put("contentPreview", preview.substring(0, 100) + "...");
+                }
+            }
+        });
 
-        } catch (Exception e) {
-            // 模拟数据
-            analysis.put("activeDays", 5);
-            analysis.put("avgDocumentLength", 256);
-            analysis.put("lastStudyTime", LocalDateTime.now().minusDays(1).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-            analysis.put("learningEfficiency", 75);
-            analysis.put("weeklyTrend", List.of());
-        }
-
-        return analysis;
+        return documents;
     }
 
-    /**
-     * 获取图表数据 - 为dashboard.js的图表功能提供数据
-     */
-    public Map<String, Object> getChartData(Long userId) {
-        Map<String, Object> chartData = new HashMap<>();
-
-        try {
-            // 文档趋势
-            List<Map<String, Object>> documentTrend = dashboardMapper.getDocumentTrend(userId);
-            chartData.put("documentTrend", documentTrend);
-
-            // 分类分布
-            List<Map<String, Object>> categoryDistribution = dashboardMapper.getCategoryDocumentDistribution(userId);
-            chartData.put("categoryDistribution", categoryDistribution);
-
-            // 热门标签
-            List<Map<String, Object>> popularTags = dashboardMapper.getPopularTags(userId);
-            chartData.put("popularTags", popularTags);
-
-        } catch (Exception e) {
-            // 返回模拟图表数据
-            String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-            String yesterday = LocalDateTime.now().minusDays(1).format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-            String twoDaysAgo = LocalDateTime.now().minusDays(2).format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-
-            chartData.put("documentTrend", List.of(
-                    Map.of("date", twoDaysAgo, "count", 2),
-                    Map.of("date", yesterday, "count", 3),
-                    Map.of("date", today, "count", 1)
-            ));
-
-            chartData.put("categoryDistribution", List.of(
-                    Map.of("categoryName", "技术笔记", "documentCount", 8),
-                    Map.of("categoryName", "学习总结", "documentCount", 5),
-                    Map.of("categoryName", "日常记录", "documentCount", 2)
-            ));
-
-            chartData.put("popularTags", List.of(
-                    Map.of("tagName", "Java", "usageCount", 5),
-                    Map.of("tagName", "Spring Boot", "usageCount", 4),
-                    Map.of("tagName", "数据库", "usageCount", 3)
-            ));
+    private List<Map<String, Object>> formatRecentOperations(List<Map<String, Object>> operations) {
+        if (operations == null || operations.isEmpty()) {
+            return new ArrayList<>();
         }
 
-        return chartData;
+        operations.forEach(op -> {
+            // 格式化操作时间
+            if (op.get("createdTime") != null) {
+                try {
+                    LocalDateTime dateTime = (LocalDateTime) op.get("createdTime");
+                    op.put("formattedTime", dateTime.format(DateTimeFormatter.ofPattern("MM-dd HH:mm")));
+                    op.put("relativeTime", formatRelativeTime(dateTime));
+                } catch (Exception e) {
+                    op.put("formattedTime", op.get("createdTime").toString());
+                }
+            }
+
+            // 添加操作图标
+            String operationType = op.get("operationType") != null ?
+                    op.get("operationType").toString() : "";
+            op.put("icon", getOperationIcon(operationType));
+        });
+
+        return operations;
     }
 
-    /**
-     * 模拟仪表盘数据（用于测试）- 根据dashboard.js的需求调整
-     */
-    private Map<String, Object> getMockDashboardStats() {
-        Map<String, Object> mockStats = new HashMap<>();
+    private String formatRelativeTime(LocalDateTime dateTime) {
+        long hours = java.time.Duration.between(dateTime, LocalDateTime.now()).toHours();
 
-        // dashboard.js需要的核心数据
-        mockStats.put("totalDocuments", 15);
-        mockStats.put("todayDocuments", 2);
-        mockStats.put("totalCategories", 5);
-        mockStats.put("totalTags", 12);
+        if (hours < 1) {
+            return "刚刚";
+        } else if (hours < 24) {
+            return hours + "小时前";
+        } else {
+            long days = hours / 24;
+            return days + "天前";
+        }
+    }
 
-        // 可选数据
-        mockStats.put("weekDocuments", 8);
-        mockStats.put("totalFavorites", 7);
-        mockStats.put("recentActivity", "刚刚更新了学习笔记");
-        mockStats.put("learningProgress", 65);
-        mockStats.put("activeDays", 5);
-        mockStats.put("lastUpdate", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        mockStats.put("systemStatus", "正常");
-        mockStats.put("dataTimestamp", System.currentTimeMillis());
-
-        return mockStats;
+    private String getOperationIcon(String operationType) {
+        switch (operationType.toUpperCase()) {
+            case "CREATE": return "📝";
+            case "UPDATE": return "✏️";
+            case "DELETE": return "🗑️";
+            case "LOGIN": return "🔐";
+            case "LOGOUT": return "🚪";
+            case "VIEW": return "👁️";
+            case "SEARCH": return "🔍";
+            default: return "📋";
+        }
     }
 }
