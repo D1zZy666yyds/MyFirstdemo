@@ -470,51 +470,30 @@ async function viewTagDocuments(tagId) {
     try {
         console.log('查看标签文档，标签ID:', tagId);
 
-        // 1. 跳转到搜索页面
-        window.location.hash = 'search';
-
-        // 2. 等待页面切换，然后设置标签筛选
-        setTimeout(async () => {
-            try {
-                // 等待搜索页面元素加载
-                await waitForElement('#search-tag', 10, 100);
-                await waitForElement('#global-search', 10, 100);
-
-                const tagFilter = document.getElementById('search-tag');
-                const searchInput = document.getElementById('global-search');
-
-                if (tagFilter && searchInput) {
-                    tagFilter.value = tagId;
-                    console.log('已设置标签筛选:', tagId);
-
-                    // 触发搜索
-                    if (window.app && typeof window.app.performSearch === 'function') {
-                        // 设置搜索关键词为标签名
-                        if (tagManager && tagManager.tags) {
-                            const tag = tagManager.tags.find(t => t.id === tagId);
-                            if (tag) {
-                                searchInput.value = tag.name;
-                            }
-                        }
-
-                        console.log('执行标签搜索...');
-                        await window.app.performSearch();
-                    } else {
-                        console.error('主应用未初始化');
-                        alert('应用未初始化，请刷新页面或稍后重试');
-                    }
-                } else {
-                    console.error('搜索页面元素未找到');
-                    alert('页面元素未加载完成，请稍后重试');
-                }
-            } catch (error) {
-                console.error('设置标签筛选失败:', error);
-                alert('设置标签筛选失败: ' + error.message);
+        // 1. 获取标签名称
+        let tagName = '';
+        if (tagManager && tagManager.tags) {
+            const tag = tagManager.tags.find(t => t.id === tagId);
+            if (tag) {
+                tagName = tag.name;
             }
-        }, 300);
+        }
+
+        // 2. 构建URL参数
+        const params = new URLSearchParams();
+        params.set('tagId', tagId);
+        if (tagName) {
+            params.set('keyword', encodeURIComponent(tagName));
+        }
+
+        // 3. 跳转到搜索页面
+        window.location.hash = `search?${params.toString()}`;
+
+        console.log('跳转到搜索页面，参数:', params.toString());
+
     } catch (error) {
         console.error('跳转到标签文档失败:', error);
-        alert('跳转失败: ' + error.message);
+        tagManager.showMessage('跳转失败: ' + error.message, 'error');
     }
 }
 

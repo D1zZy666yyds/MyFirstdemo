@@ -23,6 +23,20 @@ public interface SearchHistoryMapper {
     @Delete("DELETE FROM search_history WHERE user_id = #{userId}")
     int deleteByUserId(@Param("userId") Long userId);
 
+    // 🎯 新增：更新搜索结果数量 - 修复版
+    @Update("UPDATE search_history SET result_count = #{resultCount}, search_time = NOW() " +
+            "WHERE user_id = #{userId} AND keyword = #{keyword} " +
+            "ORDER BY search_time DESC LIMIT 1")
+    int updateResultCount(@Param("userId") Long userId,
+                          @Param("keyword") String keyword,
+                          @Param("resultCount") int resultCount);
+
+    // 🎯 新增：检查搜索历史是否存在
+    @Select("SELECT COUNT(*) FROM search_history " +
+            "WHERE user_id = #{userId} AND keyword = #{keyword} " +
+            "AND DATE(search_time) = CURDATE()")
+    int existsToday(@Param("userId") Long userId, @Param("keyword") String keyword);
+
     // 获取搜索统计
     @Select("SELECT " +
             "COUNT(*) as total_searches, " +
@@ -33,8 +47,16 @@ public interface SearchHistoryMapper {
     Map<String, Object> getSearchStats(@Param("userId") Long userId);
 
     // 获取热门搜索词
-    @Select("SELECT keyword, COUNT(*) as search_count " +
+    @Select("SELECT keyword, COUNT(*) as search_count, AVG(result_count) as avg_results " +
             "FROM search_history WHERE user_id = #{userId} " +
             "GROUP BY keyword ORDER BY search_count DESC LIMIT 10")
     List<Map<String, Object>> getPopularKeywords(@Param("userId") Long userId);
+
+    // 🎯 新增：获取最近搜索词（用于搜索建议）
+    @Select("SELECT DISTINCT keyword FROM search_history " +
+            "WHERE user_id = #{userId} AND keyword LIKE CONCAT('%', #{prefix}, '%') " +
+            "ORDER BY search_time DESC LIMIT #{limit}")
+    List<String> findKeywordsByPrefix(@Param("userId") Long userId,
+                                      @Param("prefix") String prefix,
+                                      @Param("limit") int limit);
 }

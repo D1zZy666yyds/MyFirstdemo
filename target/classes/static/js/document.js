@@ -1,3 +1,4 @@
+
 class DocumentManager {
     constructor() {
         this.documents = [];
@@ -134,6 +135,7 @@ class DocumentManager {
                 this.categories = response.data.data || [];
                 console.log('分类加载完成:', this.categories.length);
                 this.populateCategorySelects();
+                this.setupCategoryFilter(); // 修复：加载完分类后设置筛选器
             } else {
                 console.error('加载分类失败:', response.data.message);
                 this.categories = [];
@@ -181,14 +183,20 @@ class DocumentManager {
             }
 
             const userId = authManager.getCurrentUserId();
-            let url = `/api/document/user/${userId}`;
+            let url;
+            let params = {};
 
             if (categoryId) {
-                url += `?categoryId=${categoryId}`;
+                // ✅ 修复：使用正确的分类筛选接口
+                url = `/api/document/category/${categoryId}`;
+                params.userId = userId;
+            } else {
+                // 获取用户所有文档
+                url = `/api/document/user/${userId}`;
             }
 
-            console.log('加载文档，URL:', url);
-            const response = await axios.get(url);
+            console.log('加载文档，URL:', url, '参数:', params);
+            const response = await axios.get(url, { params: params });
 
             if (response.data.success) {
                 this.documents = response.data.data || [];
@@ -262,7 +270,7 @@ class DocumentManager {
         }
     }
 
-    // 修改：显示文档时显示标签，并为每个文档卡片添加data-document-id属性
+    // 修改：显示文档时不显示内容预览
     displayDocuments() {
         const container = document.getElementById('documents-list');
         if (!container) {
@@ -286,7 +294,6 @@ class DocumentManager {
                 <div class="doc-tags">
                     ${this.renderDocumentTags(doc.tags)}
                 </div>
-                <div class="doc-content-preview">${this.escapeHtml(doc.content ? doc.content.substring(0, 100) + '...' : '无内容')}</div>
                 <div class="doc-actions">
                     <button onclick="documentManager.viewDocument(${doc.id})" class="btn-secondary">查看</button>
                     <button onclick="documentManager.editDocument(${doc.id})" class="btn-secondary">编辑</button>
@@ -1117,13 +1124,30 @@ class DocumentManager {
     setupCategoryFilter() {
         const categoryFilter = document.getElementById('category-filter');
         if (categoryFilter) {
-            categoryFilter.addEventListener('change', (e) => {
+            // 移除旧的事件监听器（防止重复绑定）
+            categoryFilter.replaceWith(categoryFilter.cloneNode(true));
+            const freshCategoryFilter = document.getElementById('category-filter');
+
+            // 确保第一个选项是"全部分类"
+            if (freshCategoryFilter.options.length > 0 && freshCategoryFilter.options[0].value !== "") {
+                const allOption = document.createElement('option');
+                allOption.value = "";
+                allOption.textContent = "全部分类";
+                freshCategoryFilter.insertBefore(allOption, freshCategoryFilter.firstChild);
+            }
+
+            // 重新绑定事件
+            freshCategoryFilter.addEventListener('change', (e) => {
                 const categoryId = e.target.value;
+                console.log('分类筛选改变:', categoryId ? categoryId : '全部分类');
                 this.loadDocuments(categoryId || null);
             });
+
+            console.log('分类筛选器设置完成，选项数:', freshCategoryFilter.options.length);
+        } else {
+            console.error('分类筛选元素未找到');
         }
     }
-
     escapeHtml(text) {
         if (!text) return '';
         const div = document.createElement('div');

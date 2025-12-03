@@ -45,33 +45,91 @@
     <main class="main-content">
         <!-- 仪表盘页面 -->
         <div id="dashboard-page" class="page active">
+            <!-- 添加仪表盘工具栏 -->
+            <div class="dashboard-toolbar">
+                <div class="toolbar-left">
+                    <h2>📊 仪表盘概览</h2>
+                    <div class="last-updated">
+                        <span>最后更新: </span>
+                        <span id="last-loaded-time">尚未加载</span>
+                    </div>
+                </div>
+                <div class="toolbar-right">
+                    <div class="auto-refresh-toggle">
+                        <label class="switch">
+                            <input type="checkbox" id="auto-refresh-toggle">
+                            <span class="slider"></span>
+                        </label>
+                        <span>自动刷新</span>
+                    </div>
+                    <button id="refresh-dashboard" class="btn-refresh">
+                        <span class="refresh-icon">🔄</span> 刷新数据
+                    </button>
+                    <button id="export-dashboard" class="btn-secondary">
+                        <span class="export-icon">📥</span> 导出数据
+                    </button>
+                </div>
+            </div>
+
+            <!-- 消息容器 -->
+            <div id="dashboard-message" class="message-container"></div>
+
             <div class="stats-cards">
+                <!-- 保持原有的统计卡片不变 -->
                 <div class="stat-card">
-                    <h3>总文档数</h3>
+                    <h3>
+                        <span>📄</span> 总文档数
+                        <span class="stat-icon">📈</span>
+                    </h3>
                     <div id="total-documents" class="stat-number">0</div>
+                    <div class="stat-change positive">+0</div>
                 </div>
                 <div class="stat-card">
-                    <h3>今日新增</h3>
+                    <h3>
+                        <span>📅</span> 今日新增
+                        <span class="stat-icon">⚡</span>
+                    </h3>
                     <div id="today-documents" class="stat-number">0</div>
+                    <div class="stat-change positive">+0</div>
                 </div>
                 <div class="stat-card">
-                    <h3>分类数量</h3>
+                    <h3>
+                        <span>📁</span> 分类数量
+                        <span class="stat-icon">📂</span>
+                    </h3>
                     <div id="total-categories" class="stat-number">0</div>
+                    <div class="stat-change positive">+0</div>
                 </div>
                 <div class="stat-card">
-                    <h3>标签数量</h3>
+                    <h3>
+                        <span>🏷️</span> 标签数量
+                        <span class="stat-icon">🔖</span>
+                    </h3>
                     <div id="total-tags" class="stat-number">0</div>
+                    <div class="stat-change positive">+0</div>
                 </div>
             </div>
 
             <div class="dashboard-content">
                 <div class="recent-docs">
-                    <h3>最近文档</h3>
-                    <div id="recent-docs-list" class="doc-list"></div>
+                    <h3>📝 最近文档</h3>
+                    <div id="recent-docs-list" class="doc-list">
+                        <div class="empty-state">
+                            <div class="empty-icon">📄</div>
+                            <div class="empty-text">暂无最近文档</div>
+                            <div class="empty-hint">创建文档后，会在这里显示</div>
+                        </div>
+                    </div>
                 </div>
                 <div class="activity-log">
-                    <h3>最近活动</h3>
-                    <div id="activity-list" class="activity-list"></div>
+                    <h3>📋 最近活动</h3>
+                    <div id="activity-list" class="activity-list">
+                        <div class="empty-state">
+                            <div class="empty-icon">📊</div>
+                            <div class="empty-text">暂无活动记录</div>
+                            <div class="empty-hint">操作文档后，会在这里显示</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -83,7 +141,6 @@
                 <button onclick="showCreateDocumentModal()" class="btn-primary">新建文档</button>
             </div>
             <div class="toolbar">
-                <input type="text" id="doc-search" placeholder="搜索文档..." class="search-input">
                 <select id="category-filter" class="filter-select">
                     <option value="">全部分类</option>
                 </select>
@@ -106,6 +163,14 @@
                 <div class="search-input-container">
                     <input type="text" id="global-search" placeholder="输入关键词搜索..." class="search-input-large">
                     <button onclick="app.performSearch()" class="btn-primary">搜索</button>
+                </div>
+            </div>
+
+            <!-- 搜索状态显示区域 -->
+            <div class="search-status" id="search-status" style="display: none;">
+                <div class="status-info">
+                    <span id="current-filters"></span>
+                    <button onclick="app.clearSearchFilters()" class="btn-small btn-secondary">清除筛选</button>
                 </div>
             </div>
 
@@ -208,6 +273,8 @@
                 </div>
             </div>
         </div>
+
+        <!-- 收藏页面 -->
         <div id="favorites-page" class="page">
             <div class="page-header">
                 <h2>

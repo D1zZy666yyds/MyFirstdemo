@@ -1,7 +1,9 @@
+// 修复后的完整 app.js
 class KnowledgeBaseApp {
     constructor() {
         this.currentPage = 'dashboard';
         this.categories = [];
+        this.categoryCache = new Map(); // 缓存分类ID到名称的映射
         this.searchHistory = JSON.parse(localStorage.getItem('searchHistory') || '[]');
         this.init();
     }
@@ -75,7 +77,14 @@ class KnowledgeBaseApp {
         this.loadPageData(pageName);
     }
 
-    // 在 app.js 的 loadPageData 方法中，添加页面切换时的清理工作
+    // 清理模态框的方法
+    clearModals() {
+        const modalContainer = document.getElementById('modal-container');
+        if (modalContainer) {
+            modalContainer.innerHTML = '';
+        }
+    }
+
     async loadPageData(pageName) {
         console.log('加载页面数据:', pageName);
 
@@ -119,15 +128,6 @@ class KnowledgeBaseApp {
         }
     }
 
-// 新增：清理模态框的方法
-    clearModals() {
-        const modalContainer = document.getElementById('modal-container');
-        if (modalContainer) {
-            modalContainer.innerHTML = '';
-        }
-    }
-
-// 修改 loadDocumentsPage 方法 - 修复bug但功能不变
     async loadDocumentsPage() {
         try {
             // 检查URL参数是否有分类ID
@@ -150,7 +150,7 @@ class KnowledgeBaseApp {
             } else {
                 console.error('文档管理器未加载');
 
-                // 关键修复：尝试重新获取文档管理器（因为JS可能刚加载完）
+                // 尝试重新获取文档管理器
                 setTimeout(() => {
                     if (window.documentManager) {
                         // 延迟重新执行
@@ -165,7 +165,6 @@ class KnowledgeBaseApp {
             this.showError('加载文档页面失败: ' + error.message);
         }
     }
-
 
     async loadInitialData() {
         console.log('加载初始数据...');
@@ -183,6 +182,16 @@ class KnowledgeBaseApp {
 
             if (response.data.success) {
                 this.categories = response.data.data || [];
+
+                // 建立分类缓存
+                this.categoryCache.clear();
+                this.categories.forEach(category => {
+                    if (category.id && category.name) {
+                        this.categoryCache.set(category.id, category.name);
+                    }
+                });
+
+                console.log('分类缓存建立完成:', this.categoryCache.size, '条记录');
                 this.updateCategoryFilters();
                 console.log('加载分类完成:', this.categories.length);
             } else {
@@ -192,6 +201,36 @@ class KnowledgeBaseApp {
             console.error('加载分类失败:', error);
             // 不显示错误，因为分类过滤器不是关键功能
         }
+    }
+
+    // 获取分类显示名称（简化版）
+    getCategoryDisplay(categoryInfo) {
+        if (!categoryInfo && categoryInfo !== 0) return '未分类';
+
+        // 情况1：已经是字符串名称
+        if (typeof categoryInfo === 'string') {
+            return categoryInfo;
+        }
+
+        // 情况2：是数字ID
+        if (typeof categoryInfo === 'number' || /^\d+$/.test(String(categoryInfo))) {
+            const categoryId = Number(categoryInfo);
+            const cachedName = this.categoryCache.get(categoryId);
+            return cachedName || `分类${categoryId}`;
+        }
+
+        // 情况3：是对象
+        if (typeof categoryInfo === 'object') {
+            if (categoryInfo.name) {
+                return categoryInfo.name;
+            }
+            if (categoryInfo.id) {
+                const cachedName = this.categoryCache.get(categoryInfo.id);
+                return cachedName || `分类${categoryInfo.id}`;
+            }
+        }
+
+        return '未分类';
     }
 
     updateCategoryFilters() {
@@ -243,6 +282,7 @@ class KnowledgeBaseApp {
         const searchTag = document.getElementById('search-tag');
         if (searchTag) {
             searchTag.addEventListener('change', () => {
+                console.log('标签筛选变化:', searchTag.value);
                 this.performSearch();
             });
         }
@@ -251,6 +291,7 @@ class KnowledgeBaseApp {
         const searchCategory = document.getElementById('search-category');
         if (searchCategory) {
             searchCategory.addEventListener('change', () => {
+                console.log('分类筛选变化:', searchCategory.value);
                 this.performSearch();
             });
         }
@@ -358,7 +399,7 @@ class KnowledgeBaseApp {
         }
     }
 
-    // 修改：增强搜索验证
+    // 核心修复：执行搜索
     async performSearch() {
         const globalSearch = document.getElementById('global-search');
         const searchCategory = document.getElementById('search-category');
@@ -381,30 +422,71 @@ class KnowledgeBaseApp {
 
         try {
             const userId = authManager.getCurrentUserId();
-            const params = {
-                keyword,
-                userId: userId,
-                limit: 50
-            };
-
-            // 只有在元素存在且有值时才添加参数
-            if (searchCategory && searchCategory.value) {
-                params.categoryId = searchCategory.value;
-            }
-            if (searchTag && searchTag.value) {
-                params.tagId = searchTag.value;
-            }
-
-            // 显示加载状态
             this.showSearchLoading(true);
 
-            const response = await axios.get('/api/search', { params });
+            console.log('🔍 开始搜索:', keyword);
+
+            let response;
+
+            // 根据筛选条件选择API
+            const categoryId = searchCategory && searchCategory.value ? parseInt(searchCategory.value) : null;
+            const tagId = searchTag && searchTag.value ? parseInt(searchTag.value) : null;
+
+            if (categoryId && tagId) {
+                // 高级搜索
+                const searchCriteria = {
+                    keyword: keyword,
+                    categoryId: categoryId,
+                    tagIds: [tagId],
+                    limit: 50
+                };
+                response = await axios.post('/api/search/advanced', searchCriteria, {
+                    params: { userId: userId }
+                });
+            } else if (categoryId) {
+                // 分类搜索
+                response = await axios.get('/api/search/category', {
+                    params: {
+                        keyword: keyword,
+                        categoryId: categoryId,
+                        userId: userId,
+                        limit: 50
+                    }
+                });
+            } else if (tagId) {
+                // 标签搜索
+                response = await axios.get('/api/search/tag', {
+                    params: {
+                        keyword: keyword,
+                        tagId: tagId,
+                        userId: userId,
+                        limit: 50
+                    }
+                });
+            } else {
+                // 基础搜索
+                response = await axios.get('/api/search', {
+                    params: {
+                        keyword: keyword,
+                        userId: userId,
+                        limit: 50
+                    }
+                });
+            }
+
+            console.log('搜索响应:', response.data);
 
             if (response.data.success) {
-                this.displaySearchResults(response.data.data, keyword);
-                this.updateSearchStats(response.data.data);
+                const documents = response.data.data || [];
+                console.log(`接收到 ${documents.length} 个文档`);
+
+                // 显示搜索结果
+                this.displaySearchResults(documents, keyword);
+
+                // 更新搜索历史显示
+                this.displaySearchHistory();
             } else {
-                throw new Error(response.data.message);
+                throw new Error(response.data.message || '搜索失败');
             }
         } catch (error) {
             console.error('搜索失败:', error);
@@ -414,6 +496,68 @@ class KnowledgeBaseApp {
             this.showSearchLoading(false);
         }
     }
+
+    // 渲染搜索结果项（兼容多种字段名）
+    renderSearchResultItem(doc, keyword) {
+        // 验证文档数据
+        if (!doc || !doc.id) {
+            console.warn('无效的文档数据:', doc);
+            return '';
+        }
+
+        // 🎯 兼容性处理：支持多种字段名
+        const docId = doc.id || doc.docId;
+        const title = doc.title || doc.name || '无标题';
+        const content = doc.content || '无内容';
+        const categoryId = doc.categoryId || doc.category;
+        const tags = doc.tags || doc.tagList || [];
+        const updateTime = doc.updateTime || doc.updatedTime || doc.createdTime;
+
+        // 获取文档标题（带高亮）
+        const highlightedTitle = this.highlightText(title, keyword);
+
+        // 获取内容预览（简单截取）
+        const contentPreview = content ?
+            this.highlightText(this.getSimplePreview(content, 150), keyword) :
+            '无内容';
+
+        // 🎯 修复：使用新的分类显示方法
+        const categoryDisplay = this.getCategoryDisplay(categoryId);
+
+        // 🎯 修复：标签显示（兼容数组和对象列表）
+        let tagsDisplay = this.formatTags(tags);
+
+        // 格式化时间
+        const formattedTime = updateTime ?
+            new Date(updateTime).toLocaleString('zh-CN') : '未知';
+
+        return `
+        <div class="search-result-item" data-doc-id="${docId}">
+            <div class="result-header">
+                <h4 class="result-title">${highlightedTitle}</h4>
+                <div class="result-actions">
+                    <button onclick="app.viewSearchDocument(${docId})" class="btn-small" title="查看">👁️</button>
+                    <button onclick="app.editSearchDocument(${docId})" class="btn-small" title="编辑">✏️</button>
+                </div>
+            </div>
+            <div class="result-content">
+                <p class="doc-preview">${contentPreview}</p>
+            </div>
+            <div class="result-meta">
+                <span class="meta-item">
+                    <strong>分类:</strong> ${categoryDisplay}
+                </span>
+                <span class="meta-item">
+                    <strong>标签:</strong> ${tagsDisplay}
+                </span>
+                <span class="meta-item">
+                    <strong>更新时间:</strong> ${formattedTime}
+                </span>
+            </div>
+        </div>
+    `;
+    }
+
 
     // 显示搜索加载状态
     showSearchLoading(loading) {
@@ -435,40 +579,34 @@ class KnowledgeBaseApp {
         }
     }
 
-    // 显示搜索结果
+    // 🎯 核心修复：显示搜索结果（不再过滤）
     displaySearchResults(documents, keyword) {
         const resultsContainer = document.getElementById('search-results');
-        if (!resultsContainer) return;
-
-        if (!documents || documents.length === 0) {
-            resultsContainer.innerHTML = `
-                <div class="no-results">
-                    <div class="no-results-icon">🔍</div>
-                    <h3>没有找到相关文档</h3>
-                    <p>尝试使用其他关键词或调整筛选条件</p>
-                    <div class="search-tips">
-                        <h4>搜索提示：</h4>
-                        <ul>
-                            <li>使用更具体的关键词</li>
-                            <li>尝试不同的搜索词组合</li>
-                            <li>检查筛选条件</li>
-                            <li>使用文档标题中的关键词</li>
-                        </ul>
-                    </div>
-                </div>
-            `;
+        if (!resultsContainer) {
+            console.error('搜索结果容器未找到');
             return;
         }
 
+        // 验证数据
+        if (!Array.isArray(documents)) {
+            console.error('返回数据不是数组:', documents);
+            documents = [];
+        }
+
+        if (documents.length === 0) {
+            resultsContainer.innerHTML = this.renderNoResults(keyword);
+            return;
+        }
+
+        // 🎯 直接显示所有返回的文档，信任后端的搜索结果
         resultsContainer.innerHTML = `
             <div class="search-results-header">
                 <div class="results-stats">
-                    <span>找到 ${documents.length} 个相关文档</span>
+                    <span>找到 ${documents.length} 个文档</span>
                     <span class="search-keyword">关键词: "${keyword}"</span>
                 </div>
                 <div class="results-actions">
                     <button onclick="app.clearSearchFilters()" class="btn-secondary btn-small">清除筛选</button>
-                    <button onclick="app.exportSearchResults()" class="btn-secondary btn-small">导出结果</button>
                 </div>
             </div>
             <div class="search-results-list">
@@ -477,48 +615,76 @@ class KnowledgeBaseApp {
         `;
     }
 
-    // 渲染单个搜索结果项
-    renderSearchResultItem(doc, keyword) {
-        const contentPreview = doc.content ?
-            this.highlightText(doc.content.substring(0, 200), keyword) + '...' :
-            '无内容';
-
-        const title = doc.title ? this.highlightText(doc.title, keyword) : '无标题';
-
-        // 确保有有效的文档ID
-        const docId = doc.id || doc._id || 0;
-
+    // 无结果时的显示
+    renderNoResults(keyword) {
         return `
-            <div class="search-result-item" data-doc-id="${docId}">
-                <div class="result-header">
-                    <h4 class="result-title">${title}</h4>
-                    <div class="result-actions">
-                        <button onclick="app.viewSearchDocument(${docId})" class="btn-small" title="查看">👁️</button>
-                        <button onclick="app.editSearchDocument(${docId})" class="btn-small" title="编辑">✏️</button>
-                    </div>
-                </div>
-                <div class="result-content">
-                    <p class="doc-preview">${contentPreview}</p>
-                </div>
-                <div class="result-meta">
-                    <span class="meta-item">
-                        <strong>分类:</strong> ${doc.categoryName || '未分类'}
-                    </span>
-                    <span class="meta-item">
-                        <strong>标签:</strong> ${doc.tags ? doc.tags.join(', ') : '无'}
-                    </span>
-                    <span class="meta-item">
-                        <strong>更新时间:</strong> ${doc.updateTime ? new Date(doc.updateTime).toLocaleString() : '未知'}
-                    </span>
-                    <span class="meta-item">
-                        <strong>相关性:</strong> ${this.calculateRelevance(doc, keyword)}%
-                    </span>
+            <div class="no-results">
+                <div class="no-results-icon">🔍</div>
+                <h3>没有找到相关文档</h3>
+                <p>关键词: "${keyword}"</p>
+                <div class="search-tips">
+                    <h4>搜索提示：</h4>
+                    <ul>
+                        <li>使用更具体的关键词</li>
+                        <li>尝试不同的搜索词组合</li>
+                        <li>检查筛选条件</li>
+                        <li>使用文档标题中的关键词</li>
+                    </ul>
                 </div>
             </div>
         `;
     }
 
-    // 新增：处理搜索结果中的文档查看
+    // 格式化标签显示
+    formatTags(tags) {
+        if (!tags) return '无标签';
+
+        // 尝试解析标签数据
+        try {
+            if (typeof tags === 'string') {
+                // 尝试解析JSON字符串
+                const parsed = JSON.parse(tags);
+                if (Array.isArray(parsed)) {
+                    tags = parsed;
+                }
+            }
+
+            if (Array.isArray(tags)) {
+                const tagNames = tags.map(tag => {
+                    if (typeof tag === 'string') return tag;
+                    if (tag && tag.name) return tag.name;
+                    return '';
+                }).filter(name => name && name.trim() !== '');
+
+                return tagNames.length > 0 ? tagNames.join(', ') : '无标签';
+            }
+        } catch (e) {
+            // 如果解析失败，尝试直接使用
+            if (typeof tags === 'string') {
+                return tags;
+            }
+        }
+
+        return '无标签';
+    }
+
+    // 简单内容预览（不包含关键词过滤）
+    getSimplePreview(content, maxLength = 150) {
+        if (!content) return '';
+
+        // 移除HTML标签
+        const plainText = content.replace(/<[^>]*>/g, '');
+
+        // 截取指定长度
+        if (plainText.length <= maxLength) {
+            return plainText;
+        }
+
+        // 截取并在末尾加省略号
+        return plainText.substring(0, maxLength) + '...';
+    }
+
+    // 处理搜索结果中的文档查看
     async viewSearchDocument(docId) {
         try {
             if (window.documentManager) {
@@ -532,7 +698,7 @@ class KnowledgeBaseApp {
         }
     }
 
-    // 新增：处理搜索结果中的文档编辑
+    // 处理搜索结果中的文档编辑
     async editSearchDocument(docId) {
         try {
             if (window.documentManager) {
@@ -546,33 +712,12 @@ class KnowledgeBaseApp {
         }
     }
 
-    // 计算相关性（简化版）
-    calculateRelevance(doc, keyword) {
-        let score = 0;
-        const keywords = keyword.toLowerCase().split(' ');
-
-        if (doc.title && doc.title.toLowerCase().includes(keyword.toLowerCase())) {
-            score += 50;
-        }
-
-        if (doc.content && doc.content.toLowerCase().includes(keyword.toLowerCase())) {
-            score += 30;
-        }
-
-        // 关键词匹配
-        keywords.forEach(kw => {
-            if (doc.title && doc.title.toLowerCase().includes(kw)) score += 10;
-            if (doc.content && doc.content.toLowerCase().includes(kw)) score += 5;
-        });
-
-        return Math.min(score, 100);
-    }
-
     // 高亮文本
     highlightText(text, keyword) {
-        if (!text || !keyword) return this.escapeHtml(text);
+        if (!text || !keyword) return this.escapeHtml(text || '');
 
-        const regex = new RegExp(`(${this.escapeRegex(keyword)})`, 'gi');
+        const escapedKeyword = this.escapeRegex(keyword);
+        const regex = new RegExp(`(${escapedKeyword})`, 'gi');
         return this.escapeHtml(text).replace(regex, '<mark>$1</mark>');
     }
 
@@ -583,10 +728,14 @@ class KnowledgeBaseApp {
 
     // 保存搜索历史
     saveToSearchHistory(keyword) {
+        if (!keyword || keyword.trim() === '') return;
+
+        const trimmedKeyword = keyword.trim();
+
         // 移除重复项
-        this.searchHistory = this.searchHistory.filter(item => item !== keyword);
+        this.searchHistory = this.searchHistory.filter(item => item !== trimmedKeyword);
         // 添加到开头
-        this.searchHistory.unshift(keyword);
+        this.searchHistory.unshift(trimmedKeyword);
         // 限制历史记录数量
         this.searchHistory = this.searchHistory.slice(0, 10);
         // 保存到本地存储
@@ -602,7 +751,8 @@ class KnowledgeBaseApp {
         if (searchCategory) searchCategory.value = '';
         if (searchTag) searchTag.value = '';
 
-        if (globalSearch && globalSearch.value) {
+        // 如果搜索框有内容，重新搜索
+        if (globalSearch && globalSearch.value.trim()) {
             this.performSearch();
         }
     }
@@ -618,11 +768,22 @@ class KnowledgeBaseApp {
             return;
         }
 
-        const exportData = results.map(item => ({
-            title: item.querySelector('.result-title').textContent.replace(/🔍/g, '').trim(),
-            category: item.querySelector('.meta-item:nth-child(1)').textContent.replace('分类:', '').trim(),
-            updateTime: item.querySelector('.meta-item:nth-child(3)').textContent.replace('更新时间:', '').trim()
-        }));
+        const exportData = results.map(item => {
+            const titleElem = item.querySelector('.result-title');
+            const categoryElem = item.querySelector('.meta-item:nth-child(1)');
+            const timeElem = item.querySelector('.meta-item:nth-child(3)');
+
+            return {
+                title: titleElem ? titleElem.textContent.replace(/🔍/g, '').trim() : '',
+                category: categoryElem ? categoryElem.textContent.replace('分类:', '').trim() : '',
+                updateTime: timeElem ? timeElem.textContent.replace('更新时间:', '').trim() : ''
+            };
+        }).filter(item => item.title); // 过滤掉空标题
+
+        if (exportData.length === 0) {
+            this.showError('没有有效的搜索结果可以导出');
+            return;
+        }
 
         const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -633,21 +794,6 @@ class KnowledgeBaseApp {
         URL.revokeObjectURL(url);
 
         this.showSuccess(`已导出 ${exportData.length} 条搜索结果`);
-    }
-
-    // 更新搜索统计
-    updateSearchStats(documents) {
-        const stats = {
-            total: documents.length,
-            withContent: documents.filter(doc => doc.content && doc.content.length > 0).length,
-            recent: documents.filter(doc => {
-                const updateTime = new Date(doc.updateTime);
-                const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-                return updateTime > weekAgo;
-            }).length
-        };
-
-        console.log('搜索统计:', stats);
     }
 
     async setupSearchPage() {
@@ -686,38 +832,62 @@ class KnowledgeBaseApp {
         }
     }
 
+    // 显示搜索历史
     displaySearchHistory() {
         const historyContainer = document.getElementById('search-history');
-        if (!historyContainer || this.searchHistory.length === 0) return;
+        if (!historyContainer) {
+            console.error('搜索历史容器未找到');
+            return;
+        }
+
+        if (!this.searchHistory || this.searchHistory.length === 0) {
+            historyContainer.innerHTML = `
+                <div class="search-history-section">
+                    <h4>搜索历史</h4>
+                    <div class="no-history">
+                        <span>暂无搜索历史</span>
+                    </div>
+                </div>
+            `;
+            return;
+        }
 
         historyContainer.innerHTML = `
             <div class="search-history-section">
-                <h4>搜索历史</h4>
+                <div class="search-history-header">
+                    <h4>搜索历史</h4>
+                    <button onclick="app.clearSearchHistory()" class="btn-secondary btn-small">清除历史</button>
+                </div>
                 <div class="history-items">
                     ${this.searchHistory.map(item => `
-                        <span class="history-item" onclick="app.useHistoryItem('${this.escapeHtml(item)}')">
-                            ${this.escapeHtml(item)}
-                            <button onclick="app.removeHistoryItem('${this.escapeHtml(item)}')" class="btn-remove">×</button>
-                        </span>
+                        <div class="history-item">
+                            <span class="history-text" onclick="event.stopPropagation(); app.useHistoryItem('${this.escapeHtml(item)}')">
+                                ${this.escapeHtml(item)}
+                            </span>
+                            <button onclick="event.stopPropagation(); app.removeHistoryItem('${this.escapeHtml(item)}')" class="btn-remove" title="删除此项">×</button>
+                        </div>
                     `).join('')}
                 </div>
-                <button onclick="app.clearSearchHistory()" class="btn-secondary btn-small">清除历史</button>
             </div>
         `;
     }
 
+    // 删除历史项
+    removeHistoryItem(item) {
+        // event.stopPropagation() 已经在HTML中调用
+        this.searchHistory = this.searchHistory.filter(history => history !== item);
+        localStorage.setItem('searchHistory', JSON.stringify(this.searchHistory));
+        this.displaySearchHistory();
+    }
+
+    // 使用历史项
     useHistoryItem(item) {
+        // event.stopPropagation() 已经在HTML中调用
         const globalSearch = document.getElementById('global-search');
         if (globalSearch) {
             globalSearch.value = item;
             this.performSearch();
         }
-    }
-
-    removeHistoryItem(item) {
-        this.searchHistory = this.searchHistory.filter(history => history !== item);
-        localStorage.setItem('searchHistory', JSON.stringify(this.searchHistory));
-        this.displaySearchHistory();
     }
 
     clearSearchHistory() {
@@ -728,7 +898,7 @@ class KnowledgeBaseApp {
 
     escapeHtml(unsafe) {
         if (!unsafe) return '';
-        return unsafe
+        return String(unsafe)
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;")
@@ -754,12 +924,12 @@ class KnowledgeBaseApp {
         }
     }
 }
-// 在 app.js 末尾添加全局错误处理
-// 错误处理中间件
+
+// 全局错误处理
 window.addEventListener('error', function(event) {
     console.error('全局错误捕获:', event.error);
 
-    // 屏蔽特定错误（如"文档管理器未加载"）
+    // 屏蔽特定错误
     if (event.error && event.error.message &&
         (event.error.message.includes('未加载') ||
             event.error.message.includes('未初始化'))) {
@@ -778,6 +948,4 @@ window.addEventListener('unhandledrejection', function(event) {
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM加载完成，初始化主应用');
     window.app = new KnowledgeBaseApp();
-
-
 });
