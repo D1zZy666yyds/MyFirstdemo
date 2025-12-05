@@ -1,4 +1,4 @@
-// 标签管理功能
+// 标签管理功能 - 完整修复版本
 class TagManager {
     constructor() {
         this.tags = [];
@@ -7,6 +7,8 @@ class TagManager {
         this.searchKeyword = '';
         this.sortBy = 'name';
         this.userId = null;
+        this.totalTags = 0;
+        this.isLoading = false;
     }
 
     // 初始化标签管理
@@ -16,16 +18,21 @@ class TagManager {
             await authManager.checkAuthStatus();
             if (!authManager.isAuthenticated()) {
                 console.warn('用户未登录，无法加载标签');
+                this.showLoginPrompt();
                 return;
             }
 
             this.userId = authManager.getCurrentUserId();
             await this.loadTags();
             this.setupEventListeners();
+            this.updateStats();
         } catch (error) {
             console.error('标签管理器初始化失败:', error);
+            this.showMessage('初始化失败，请刷新页面重试', 'error');
         }
     }
+
+    // ==================== 核心方法 ====================
 
     // 设置事件监听器
     setupEventListeners() {
@@ -35,9 +42,22 @@ class TagManager {
         if (tagSearchInput) {
             tagSearchInput.addEventListener('input', (e) => {
                 clearTimeout(searchTimer);
+
+                // 显示搜索中状态
+                const searchIcon = tagSearchInput.previousElementSibling;
+                if (searchIcon) {
+                    searchIcon.textContent = '⏳';
+                }
+
                 searchTimer = setTimeout(() => {
                     this.searchKeyword = e.target.value;
+                    this.currentPage = 1;
                     this.loadTags();
+
+                    // 恢复搜索图标
+                    if (searchIcon) {
+                        searchIcon.textContent = '🔍';
+                    }
                 }, 300);
             });
         }
@@ -47,7 +67,14 @@ class TagManager {
         if (tagSortSelect) {
             tagSortSelect.addEventListener('change', (e) => {
                 this.sortBy = e.target.value;
+                this.currentPage = 1;
                 this.loadTags();
+
+                // 添加视觉反馈
+                tagSortSelect.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.2)';
+                setTimeout(() => {
+                    tagSortSelect.style.boxShadow = '';
+                }, 300);
             });
         }
     }
@@ -60,18 +87,16 @@ class TagManager {
                 return;
             }
 
-            console.log('加载标签，用户ID:', this.userId);
             const response = await axios.get(`/api/tag/user/${this.userId}`);
-
-            console.log('标签响应:', response.data);
 
             if (response.data.success) {
                 this.tags = response.data.data || [];
-                console.log('原始标签数据:', this.tags);
+                this.totalTags = this.tags.length;
 
                 // 应用搜索和排序
                 this.applyFiltersAndSort();
                 this.renderTags();
+                this.updateStats();
             } else {
                 throw new Error(response.data.message);
             }
@@ -103,9 +128,11 @@ class TagManager {
             case 'created':
                 filteredTags.sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
                 break;
+            case 'updated':
+                filteredTags.sort((a, b) => new Date(b.updatedTime || b.createdTime) - new Date(a.updatedTime || a.createdTime));
+                break;
         }
 
-        // 关键修复：不要覆盖 this.tags，只在渲染时使用过滤后的数据
         this.filteredTagsForRender = filteredTags;
     }
 
@@ -130,14 +157,21 @@ class TagManager {
             return;
         }
 
-        container.innerHTML = tagsToRender.map(tag => {
-            // 确保 documentCount 正确显示
+        const html = tagsToRender.map((tag, index) => {
             const documentCount = tag.documentCount !== undefined && tag.documentCount !== null ? tag.documentCount : 0;
+            const createdTime = new Date(tag.createdTime);
+            const timeAgo = this.getTimeAgo(createdTime);
 
             return `
-                <div class="tag-item" data-tag-id="${tag.id}">
+                <div class="tag-item" data-tag-id="${tag.id}" style="animation-delay: ${index * 50}ms">
                     <div class="tag-info">
-                        <span class="tag-name">${this.escapeHtml(tag.name)}</span>
+                        <div class="tag-color-indicator"></div>
+                        <div>
+                            <span class="tag-name">${this.escapeHtml(tag.name)}</span>
+                            <div class="tag-description">
+                                ${timeAgo}创建 • ${tag.description || '无描述'}
+                            </div>
+                        </div>
                     </div>
                     <div class="tag-stats">
                         <div class="tag-stat">
@@ -146,60 +180,72 @@ class TagManager {
                         </div>
                     </div>
                     <div class="tag-actions">
-                        <button onclick="viewTagDocuments(${tag.id})" class="btn-small" title="查看文档">👁️</button>
-                        <button onclick="editTag(${tag.id})" class="btn-small" title="编辑">✏️</button>
-                        <button onclick="deleteTag(${tag.id})" class="btn-small btn-danger" title="删除">🗑️</button>
+                        <button onclick="viewTagDocuments(${tag.id})" 
+                                class="tag-btn tag-btn-view" 
+                                title="查看文档">
+                            👁️
+                        </button>
+                        <button onclick="editTag(${tag.id})" 
+                                class="tag-btn tag-btn-edit" 
+                                title="编辑标签">
+                            ✏️
+                        </button>
+                        <button onclick="deleteTag(${tag.id})" 
+                                class="tag-btn tag-btn-delete" 
+                                title="删除标签">
+                            🗑️
+                        </button>
                     </div>
                 </div>
             `;
         }).join('');
+
+        container.innerHTML = html;
+
+        // 添加淡入动画
+        setTimeout(() => {
+            const tagItems = container.querySelectorAll('.tag-item');
+            tagItems.forEach(item => {
+                item.style.animation = 'fadeIn 0.3s ease forwards';
+                item.style.opacity = '0';
+            });
+        }, 0);
     }
 
-    // 显示创建标签模态框
-    showCreateTagModal() {
-        if (!authManager.isAuthenticated()) {
-            alert('请先登录系统');
-            return;
+    // 更新统计信息
+    updateStats() {
+        const totalElement = document.getElementById('tags-total');
+        const usedElement = document.getElementById('tags-used');
+        const recentElement = document.getElementById('tags-recent');
+
+        if (totalElement) {
+            totalElement.textContent = this.totalTags;
         }
 
-        const modalHtml = `
-            <div class="modal">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h3>新建标签</h3>
-                        <span class="close" onclick="closeModal()">&times;</span>
-                    </div>
-                    <div class="modal-body">
-                        <form id="create-tag-form" class="tag-form">
-                            <div class="form-group">
-                                <label for="tag-name">标签名称 *</label>
-                                <input type="text" id="tag-name" class="form-input" required 
-                                       placeholder="请输入标签名称" maxlength="20">
-                                <div class="input-hint">最多20个字符，同一用户不能创建重复名称</div>
-                                <div id="tag-name-error" class="error-message"></div>
-                            </div>
-                            
-                            <div id="tag-message" class="message-container"></div>
-                            
-                            <div class="form-actions">
-                                <button type="submit" class="btn-primary">创建</button>
-                                <button type="button" class="btn-secondary" onclick="closeModal()">取消</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        `;
+        if (usedElement) {
+            const usedTags = this.tags.filter(tag => (tag.documentCount || 0) > 0).length;
+            usedElement.textContent = usedTags;
+        }
 
-        document.getElementById('modal-container').innerHTML = modalHtml;
-        this.setupTagForm('create');
+        if (recentElement) {
+            const recentTags = this.tags.filter(tag => {
+                const createdTime = new Date(tag.createdTime);
+                const weekAgo = new Date();
+                weekAgo.setDate(weekAgo.getDate() - 7);
+                return createdTime > weekAgo;
+            }).length;
+            recentElement.textContent = recentTags;
+        }
     }
+
+    // ==================== 标签表单相关方法 ====================
 
     // 设置标签表单
     setupTagForm(mode, tagData = null) {
         const form = document.getElementById(`${mode}-tag-form`);
         const messageDiv = document.getElementById('tag-message');
         const nameInput = document.getElementById('tag-name');
+        const descriptionInput = document.getElementById('tag-description');
 
         // 清除之前的监听器
         const newForm = form.cloneNode(true);
@@ -209,6 +255,7 @@ class TagManager {
         const newFormElement = document.getElementById(`${mode}-tag-form`);
         const newMessageDiv = document.getElementById('tag-message');
         const newNameInput = document.getElementById('tag-name');
+        const newDescriptionInput = document.getElementById('tag-description');
 
         newFormElement.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -217,6 +264,11 @@ class TagManager {
                 name: newNameInput.value.trim(),
                 userId: this.userId
             };
+
+            // 如果有描述字段
+            if (newDescriptionInput) {
+                formData.description = newDescriptionInput.value.trim();
+            }
 
             // 验证
             if (!formData.name) {
@@ -276,11 +328,76 @@ class TagManager {
         // 如果是编辑模式，填充数据
         if (mode === 'edit' && tagData) {
             newNameInput.value = tagData.name;
+            if (newDescriptionInput && tagData.description) {
+                newDescriptionInput.value = tagData.description;
+            }
         }
 
         // 聚焦到输入框
         setTimeout(() => {
             newNameInput.focus();
+        }, 100);
+    }
+
+    // ==================== 模态框相关方法 ====================
+
+    // 显示创建标签模态框
+    showCreateTagModal() {
+        if (!authManager.isAuthenticated()) {
+            this.showMessage('请先登录系统', 'warning');
+            return;
+        }
+
+        const modalHtml = `
+            <div class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>🏷️ 新建标签</h3>
+                        <span class="close" onclick="closeModal()">&times;</span>
+                    </div>
+                    <div class="modal-body">
+                        <form id="create-tag-form" class="tag-form">
+                            <div class="form-group">
+                                <label for="tag-name">标签名称 *</label>
+                                <input type="text" id="tag-name" class="form-input" required 
+                                       placeholder="请输入标签名称（最多20个字符）" 
+                                       maxlength="20"
+                                       autocomplete="off">
+                                <div class="input-hint">建议使用简洁明了的名称，便于识别和管理</div>
+                                <div id="tag-name-error" class="error-message"></div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="tag-description">描述（可选）</label>
+                                <textarea id="tag-description" class="form-input" 
+                                          placeholder="添加标签描述，帮助理解用途..."
+                                          rows="2"></textarea>
+                                <div class="input-hint">最多100个字符</div>
+                            </div>
+                            
+                            <div id="tag-message" class="message-container"></div>
+                            
+                            <div class="form-actions">
+                                <button type="submit" class="btn-primary">
+                                    <span>创建标签</span>
+                                </button>
+                                <button type="button" class="btn-secondary" onclick="closeModal()">
+                                    取消
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.getElementById('modal-container').innerHTML = modalHtml;
+        this.setupTagForm('create');
+
+        // 聚焦到输入框
+        setTimeout(() => {
+            const input = document.getElementById('tag-name');
+            if (input) input.focus();
         }, 100);
     }
 
@@ -313,7 +430,7 @@ class TagManager {
             <div class="modal">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3>编辑标签</h3>
+                        <h3>✏️ 编辑标签</h3>
                         <span class="close" onclick="closeModal()">&times;</span>
                     </div>
                     <div class="modal-body">
@@ -322,9 +439,17 @@ class TagManager {
                                 <label for="tag-name">标签名称 *</label>
                                 <input type="text" id="tag-name" class="form-input" required 
                                        value="${this.escapeHtml(tagData.name)}" 
-                                       placeholder="请输入标签名称" maxlength="20">
-                                <div class="input-hint">最多20个字符，同一用户不能创建重复名称</div>
+                                       placeholder="请输入标签名称" 
+                                       maxlength="20">
+                                <div class="input-hint">同一用户不能创建重复名称</div>
                                 <div id="tag-name-error" class="error-message"></div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="tag-description">描述（可选）</label>
+                                <textarea id="tag-description" class="form-input" 
+                                          placeholder="添加标签描述..."
+                                          rows="2">${this.escapeHtml(tagData.description || '')}</textarea>
                             </div>
                             
                             <div class="form-group">
@@ -332,14 +457,19 @@ class TagManager {
                                 <div class="tag-info-display">
                                     <span>创建时间: ${new Date(tagData.createdTime).toLocaleString()}</span>
                                     <span>关联文档: ${tagData.documentCount || 0} 个</span>
+                                    ${tagData.updatedTime ? `<span>最后更新: ${new Date(tagData.updatedTime).toLocaleString()}</span>` : ''}
                                 </div>
                             </div>
                             
                             <div id="tag-message" class="message-container"></div>
                             
                             <div class="form-actions">
-                                <button type="submit" class="btn-primary">更新</button>
-                                <button type="button" class="btn-secondary" onclick="closeModal()">取消</button>
+                                <button type="submit" class="btn-primary">
+                                    <span>更新标签</span>
+                                </button>
+                                <button type="button" class="btn-secondary" onclick="closeModal()">
+                                    取消
+                                </button>
                             </div>
                         </form>
                     </div>
@@ -350,6 +480,8 @@ class TagManager {
         document.getElementById('modal-container').innerHTML = modalHtml;
         this.setupTagForm('edit', tagData);
     }
+
+    // ==================== 删除标签方法 ====================
 
     // 删除标签
     async deleteTag(tagId) {
@@ -389,7 +521,21 @@ class TagManager {
         }
     }
 
-    // 工具方法
+    // ==================== 工具方法 ====================
+
+    // 获取时间间隔描述
+    getTimeAgo(date) {
+        const now = new Date();
+        const diffInSeconds = Math.floor((now - date) / 1000);
+
+        if (diffInSeconds < 60) return '刚刚';
+        if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}分钟前`;
+        if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}小时前`;
+        if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}天前`;
+        return date.toLocaleDateString();
+    }
+
+    // HTML转义
     escapeHtml(unsafe) {
         if (!unsafe) return '';
         return unsafe
@@ -400,37 +546,81 @@ class TagManager {
             .replace(/'/g, "&#039;");
     }
 
+    // 显示消息
     showMessage(message, type) {
-        // 使用 Element Plus 的消息提示
         if (window.ElMessage) {
             const ElMessage = window.ElMessage;
             if (type === 'success') {
-                ElMessage.success(message);
+                ElMessage.success({
+                    message: message,
+                    showClose: true,
+                    duration: 3000,
+                    offset: 80
+                });
             } else if (type === 'error') {
-                ElMessage.error(message);
+                ElMessage.error({
+                    message: message,
+                    showClose: true,
+                    duration: 4000,
+                    offset: 80
+                });
+            } else if (type === 'warning') {
+                ElMessage.warning({
+                    message: message,
+                    showClose: true,
+                    duration: 3000,
+                    offset: 80
+                });
             } else {
                 ElMessage.info(message);
             }
         } else {
-            // 降级处理
             alert(message);
         }
     }
 
+    // 显示表单消息
     showFormMessage(message, type, container) {
+        const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
         container.innerHTML = `
             <div class="message ${type}">
-                ${message}
+                <span class="message-icon">${icon}</span>
+                <div class="message-content">
+                    <div class="message-text">${message}</div>
+                </div>
+                <button class="message-close" onclick="this.parentElement.remove()">&times;</button>
             </div>
         `;
 
         setTimeout(() => {
-            container.innerHTML = '';
+            const messageEl = container.querySelector('.message');
+            if (messageEl) {
+                messageEl.style.animation = 'slideInRight 0.3s ease reverse';
+                setTimeout(() => messageEl.remove(), 300);
+            }
         }, 5000);
+    }
+
+    // 显示登录提示
+    showLoginPrompt() {
+        const container = document.getElementById('tags-list');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="tags-empty">
+                <div class="empty-icon">🔒</div>
+                <p>请先登录</p>
+                <p class="empty-hint">登录后即可管理您的标签</p>
+                <button onclick="window.location.hash = 'login'" class="btn-primary" style="margin-top: 16px;">
+                    去登录
+                </button>
+            </div>
+        `;
     }
 }
 
-// 全局函数
+// ==================== 全局函数 ====================
+
 let tagManager;
 
 function initTagManager() {
@@ -465,12 +655,10 @@ function deleteTag(tagId) {
     }
 }
 
-// 修改 viewTagDocuments 函数
-async function viewTagDocuments(tagId) {
+function viewTagDocuments(tagId) {
     try {
         console.log('查看标签文档，标签ID:', tagId);
 
-        // 1. 获取标签名称
         let tagName = '';
         if (tagManager && tagManager.tags) {
             const tag = tagManager.tags.find(t => t.id === tagId);
@@ -479,25 +667,24 @@ async function viewTagDocuments(tagId) {
             }
         }
 
-        // 2. 构建URL参数
         const params = new URLSearchParams();
         params.set('tagId', tagId);
         if (tagName) {
             params.set('keyword', encodeURIComponent(tagName));
         }
 
-        // 3. 跳转到搜索页面
         window.location.hash = `search?${params.toString()}`;
 
         console.log('跳转到搜索页面，参数:', params.toString());
 
     } catch (error) {
         console.error('跳转到标签文档失败:', error);
-        tagManager.showMessage('跳转失败: ' + error.message, 'error');
+        if (tagManager) {
+            tagManager.showMessage('跳转失败: ' + error.message, 'error');
+        }
     }
 }
 
-// 添加等待元素的辅助函数
 function waitForElement(selector, maxAttempts = 10, interval = 100) {
     return new Promise((resolve, reject) => {
         let attempts = 0;
@@ -519,19 +706,19 @@ function waitForElement(selector, maxAttempts = 10, interval = 100) {
     });
 }
 
-
 function closeModal() {
     const modal = document.querySelector('.modal');
     if (modal) {
-        modal.remove();
+        modal.style.animation = 'slideUp 0.3s ease reverse';
+        setTimeout(() => {
+            modal.remove();
+        }, 300);
     }
 }
-
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
     if (document.getElementById('tags-page')) {
-        // 延迟初始化，确保DOM完全加载
         setTimeout(() => {
             initTagManager();
         }, 100);

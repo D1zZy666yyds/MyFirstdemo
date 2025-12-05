@@ -271,4 +271,31 @@ public class DocumentController {
             return JsonResult.error("清空回收站失败: " + e.getMessage());
         }
     }
+
+    /**
+     * 按标签获取文档（直接实现，避免TagController调用问题）
+     */
+    @GetMapping("/tag/{tagId}")
+    public JsonResult<List<Document>> getDocumentsByTag(@PathVariable Long tagId,
+                                                        @RequestParam Long userId) {
+        try {
+            List<Document> documents = documentService.getDocumentsByTag(tagId, userId);
+            return JsonResult.success(documents);
+        } catch (Exception e) {
+            return JsonResult.error("按标签获取文档失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取文档统计信息
+     */
+    @GetMapping("/statistics/{userId}")
+    public JsonResult<Map<String, Object>> getDocumentStatistics(@PathVariable Long userId) {
+        try {
+            Map<String, Object> statistics = documentService.getDocumentStatistics(userId);
+            return JsonResult.success(statistics);
+        } catch (Exception e) {
+            return JsonResult.error("获取统计信息失败: " + e.getMessage());
+        }
+    }
 }

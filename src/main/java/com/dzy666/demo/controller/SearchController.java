@@ -1,6 +1,9 @@
 package com.dzy666.demo.controller;
 
+import com.dzy666.demo.dto.SearchResultDTO;
+import com.dzy666.demo.dto.TagDTO;
 import com.dzy666.demo.entity.Document;
+import com.dzy666.demo.entity.Tag;
 import com.dzy666.demo.service.DocumentService;
 import com.dzy666.demo.service.SearchService;
 import com.dzy666.demo.util.JsonResult;
@@ -9,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/search")
@@ -21,19 +25,19 @@ public class SearchController {
     private DocumentService documentService;
 
     /**
-     * 基础搜索（全部分类）- 增强修复版
-     * 🎯 添加详细日志，便于调试
+     * 基础搜索（全部分类）- 修复：添加排序参数
      */
     @GetMapping
-    public JsonResult<List<Map<String, Object>>> search(@RequestParam String keyword,
-                                                        @RequestParam Long userId,
-                                                        @RequestParam(defaultValue = "50") int limit) {
+    public JsonResult<List<SearchResultDTO>> search(@RequestParam String keyword,
+                                                    @RequestParam Long userId,
+                                                    @RequestParam(defaultValue = "50") int limit,
+                                                    @RequestParam(defaultValue = "relevance") String sortBy) {
         System.out.println("=== 🔍 基础搜索开始 ===");
-        System.out.println("📋 参数 - 关键词: '" + keyword + "', 用户ID: " + userId + ", 限制: " + limit);
+        System.out.println("📋 参数 - 关键词: '" + keyword + "', 用户ID: " + userId + ", 限制: " + limit + ", 排序: " + sortBy);
 
         try {
-            // 1. 调用搜索服务获取文档ID列表
-            List<Long> docIds = searchService.search(keyword, userId, limit);
+            // 1. 调用搜索服务获取文档ID列表（传入排序参数）
+            List<Long> docIds = searchService.search(keyword, userId, limit, sortBy);
             System.out.println("📊 Lucene返回 " + docIds.size() + " 个文档ID");
 
             if (docIds.isEmpty()) {
@@ -41,14 +45,11 @@ public class SearchController {
                 return JsonResult.success("未找到相关文档", new ArrayList<>());
             }
 
-            // 2. 🎯 获取完整文档信息（包含分类、标签等）
-            List<Map<String, Object>> documents = documentService.getDocumentsWithDetailsByIds(docIds, userId);
-            System.out.println("✅ 文档服务返回 " + documents.size() + " 个文档详情");
+            // 2. 获取完整文档信息并转换为标准DTO
+            List<SearchResultDTO> results = convertToSearchResultDTO(docIds, userId);
+            System.out.println("✅ 转换为 " + results.size() + " 个搜索结果DTO");
 
-            // 3. 打印文档结构便于调试
-            logDocumentDetails(documents);
-
-            return JsonResult.success("搜索完成", documents);
+            return JsonResult.success("搜索完成", results);
         } catch (IOException e) {
             System.err.println("❌ 搜索失败: " + e.getMessage());
             e.printStackTrace();
@@ -63,11 +64,11 @@ public class SearchController {
     }
 
     /**
-     * 高级搜索 - 增强修复版
+     * 高级搜索 - 修复：添加排序参数，支持多标签
      */
     @PostMapping("/advanced")
-    public JsonResult<List<Map<String, Object>>> advancedSearch(@RequestBody Map<String, Object> searchCriteria,
-                                                                @RequestParam Long userId) {
+    public JsonResult<List<SearchResultDTO>> advancedSearch(@RequestBody Map<String, Object> searchCriteria,
+                                                            @RequestParam Long userId) {
         System.out.println("=== 🔍 高级搜索开始 ===");
         System.out.println("📋 参数 - 用户ID: " + userId + ", 条件: " + searchCriteria);
 
@@ -76,24 +77,26 @@ public class SearchController {
             Long categoryId = extractLong(searchCriteria, "categoryId");
             List<Long> tagIds = extractTagIds(searchCriteria);
             String dateRange = extractString(searchCriteria, "dateRange");
+            String sortBy = extractString(searchCriteria, "sortBy");
+            if (sortBy == null) sortBy = "relevance";
             int limit = extractInt(searchCriteria, "limit", 50);
 
             System.out.println("🔧 解析参数: 关键词='" + keyword + "', 分类ID=" + categoryId +
-                    ", 标签=" + tagIds + ", 日期范围=" + dateRange);
+                    ", 标签=" + tagIds + ", 日期范围=" + dateRange + ", 排序=" + sortBy);
 
-            // 调用高级搜索
-            List<Long> docIds = searchService.advancedSearch(keyword, categoryId, tagIds, dateRange, userId, limit);
+            // 调用高级搜索（传入排序参数）
+            List<Long> docIds = searchService.advancedSearch(keyword, categoryId, tagIds, dateRange, userId, limit, sortBy);
             System.out.println("📊 高级搜索返回 " + docIds.size() + " 个文档ID");
 
             if (docIds.isEmpty()) {
                 return JsonResult.success("未找到匹配的文档", new ArrayList<>());
             }
 
-            // 🎯 获取完整文档信息
-            List<Map<String, Object>> documents = documentService.getDocumentsWithDetailsByIds(docIds, userId);
-            System.out.println("✅ 获取到 " + documents.size() + " 个文档详情");
+            // 转换为标准DTO
+            List<SearchResultDTO> results = convertToSearchResultDTO(docIds, userId);
+            System.out.println("✅ 获取到 " + results.size() + " 个搜索结果");
 
-            return JsonResult.success("高级搜索完成", documents);
+            return JsonResult.success("高级搜索完成", results);
         } catch (Exception e) {
             System.err.println("❌ 高级搜索失败: " + e.getMessage());
             e.printStackTrace();
@@ -104,18 +107,20 @@ public class SearchController {
     }
 
     /**
-     * 分类内搜索 - 增强修复版
+     * 分类内搜索 - 修复：添加排序参数
      */
     @GetMapping("/category")
-    public JsonResult<List<Map<String, Object>>> searchByCategory(@RequestParam String keyword,
-                                                                  @RequestParam Long categoryId,
-                                                                  @RequestParam Long userId,
-                                                                  @RequestParam(defaultValue = "50") int limit) {
+    public JsonResult<List<SearchResultDTO>> searchByCategory(@RequestParam String keyword,
+                                                              @RequestParam Long categoryId,
+                                                              @RequestParam Long userId,
+                                                              @RequestParam(defaultValue = "50") int limit,
+                                                              @RequestParam(defaultValue = "relevance") String sortBy) {
         System.out.println("=== 🔍 分类搜索开始 ===");
-        System.out.println("📋 参数 - 关键词: '" + keyword + "', 分类ID: " + categoryId + ", 用户ID: " + userId);
+        System.out.println("📋 参数 - 关键词: '" + keyword + "', 分类ID: " + categoryId +
+                ", 用户ID: " + userId + ", 排序: " + sortBy);
 
         try {
-            List<Long> docIds = searchService.searchByCategory(keyword, categoryId, userId, limit);
+            List<Long> docIds = searchService.searchByCategory(keyword, categoryId, userId, limit, sortBy);
             System.out.println("📊 Lucene分类搜索返回 " + docIds.size() + " 个文档ID");
 
             if (docIds.isEmpty()) {
@@ -123,11 +128,11 @@ public class SearchController {
                 return JsonResult.success("该分类下未找到相关文档", new ArrayList<>());
             }
 
-            // 🎯 获取完整文档信息
-            List<Map<String, Object>> documents = documentService.getDocumentsWithDetailsByIds(docIds, userId);
-            System.out.println("✅ 获取到 " + documents.size() + " 个文档详情");
+            // 转换为标准DTO
+            List<SearchResultDTO> results = convertToSearchResultDTO(docIds, userId);
+            System.out.println("✅ 获取到 " + results.size() + " 个搜索结果");
 
-            return JsonResult.success("分类搜索完成", documents);
+            return JsonResult.success("分类搜索完成", results);
         } catch (Exception e) {
             System.err.println("❌ 分类搜索失败: " + e.getMessage());
             e.printStackTrace();
@@ -138,18 +143,20 @@ public class SearchController {
     }
 
     /**
-     * 标签搜索 - 增强修复版
+     * 标签搜索 - 修复：添加排序参数
      */
     @GetMapping("/tag")
-    public JsonResult<List<Map<String, Object>>> searchByTag(@RequestParam String keyword,
-                                                             @RequestParam Long tagId,
-                                                             @RequestParam Long userId,
-                                                             @RequestParam(defaultValue = "50") int limit) {
+    public JsonResult<List<SearchResultDTO>> searchByTag(@RequestParam String keyword,
+                                                         @RequestParam Long tagId,
+                                                         @RequestParam Long userId,
+                                                         @RequestParam(defaultValue = "50") int limit,
+                                                         @RequestParam(defaultValue = "relevance") String sortBy) {
         System.out.println("=== 🔍 标签搜索开始 ===");
-        System.out.println("📋 参数 - 关键词: '" + keyword + "', 标签ID: " + tagId + ", 用户ID: " + userId);
+        System.out.println("📋 参数 - 关键词: '" + keyword + "', 标签ID: " + tagId +
+                ", 用户ID: " + userId + ", 排序: " + sortBy);
 
         try {
-            List<Long> docIds = searchService.searchByTag(keyword, tagId, userId, limit);
+            List<Long> docIds = searchService.searchByTag(keyword, tagId, userId, limit, sortBy);
             System.out.println("📊 Lucene标签搜索返回 " + docIds.size() + " 个文档ID");
 
             if (docIds.isEmpty()) {
@@ -157,11 +164,11 @@ public class SearchController {
                 return JsonResult.success("该标签下未找到相关文档", new ArrayList<>());
             }
 
-            // 🎯 获取完整文档信息
-            List<Map<String, Object>> documents = documentService.getDocumentsWithDetailsByIds(docIds, userId);
-            System.out.println("✅ 获取到 " + documents.size() + " 个文档详情");
+            // 转换为标准DTO
+            List<SearchResultDTO> results = convertToSearchResultDTO(docIds, userId);
+            System.out.println("✅ 获取到 " + results.size() + " 个搜索结果");
 
-            return JsonResult.success("标签搜索完成", documents);
+            return JsonResult.success("标签搜索完成", results);
         } catch (Exception e) {
             System.err.println("❌ 标签搜索失败: " + e.getMessage());
             e.printStackTrace();
@@ -172,46 +179,52 @@ public class SearchController {
     }
 
     /**
-     * 🎯 新增：智能搜索接口（统一入口）
-     * 前端可以直接调用此接口，内部根据参数自动选择搜索策略
+     * 🎯 修复：智能搜索接口（统一入口）- 支持多标签和排序
      */
     @GetMapping("/smart")
-    public JsonResult<List<Map<String, Object>>> smartSearch(
+    public JsonResult<List<SearchResultDTO>> smartSearch(
             @RequestParam String keyword,
             @RequestParam(required = false) Long categoryId,
-            @RequestParam(required = false) Long tagId,
+            @RequestParam(required = false) List<Long> tagIds,  // 改为List支持多标签
             @RequestParam Long userId,
-            @RequestParam(defaultValue = "50") int limit) {
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "relevance") String sortBy) {
 
         System.out.println("=== 🤖 智能搜索开始 ===");
         System.out.println("📋 智能搜索参数:");
         System.out.println("  • 关键词: '" + keyword + "'");
         System.out.println("  • 分类ID: " + categoryId);
-        System.out.println("  • 标签ID: " + tagId);
+        System.out.println("  • 标签IDs: " + tagIds);
         System.out.println("  • 用户ID: " + userId);
         System.out.println("  • 限制数: " + limit);
+        System.out.println("  • 排序方式: " + sortBy);
 
         try {
             List<Long> docIds;
 
             // 🎯 智能路由：根据参数自动选择搜索策略
-            if (categoryId != null && tagId != null) {
-                // 情况1：分类 + 标签组合搜索
-                System.out.println("🔄 执行分类+标签组合搜索");
-                List<Long> tagIds = Collections.singletonList(tagId);
-                docIds = searchService.advancedSearch(keyword, categoryId, tagIds, null, userId, limit);
+            if (categoryId != null && tagIds != null && !tagIds.isEmpty()) {
+                // 情况1：分类 + 多标签组合搜索
+                System.out.println("🔄 执行分类+多标签组合搜索");
+                docIds = searchService.advancedSearch(keyword, categoryId, tagIds, null, userId, limit, sortBy);
             } else if (categoryId != null) {
                 // 情况2：仅分类搜索
                 System.out.println("🔄 执行分类搜索");
-                docIds = searchService.searchByCategory(keyword, categoryId, userId, limit);
-            } else if (tagId != null) {
-                // 情况3：仅标签搜索
-                System.out.println("🔄 执行标签搜索");
-                docIds = searchService.searchByTag(keyword, tagId, userId, limit);
+                docIds = searchService.searchByCategory(keyword, categoryId, userId, limit, sortBy);
+            } else if (tagIds != null && !tagIds.isEmpty()) {
+                // 情况3：仅多标签搜索
+                System.out.println("🔄 执行多标签搜索");
+                if (tagIds.size() == 1) {
+                    // 单个标签使用专门的标签搜索方法
+                    docIds = searchService.searchByTag(keyword, tagIds.get(0), userId, limit, sortBy);
+                } else {
+                    // 多个标签使用高级搜索
+                    docIds = searchService.advancedSearch(keyword, null, tagIds, null, userId, limit, sortBy);
+                }
             } else {
                 // 情况4：基础搜索
                 System.out.println("🔄 执行基础搜索");
-                docIds = searchService.search(keyword, userId, limit);
+                docIds = searchService.search(keyword, userId, limit, sortBy);
             }
 
             System.out.println("📊 智能搜索返回 " + docIds.size() + " 个文档ID");
@@ -221,14 +234,14 @@ public class SearchController {
                 return JsonResult.success("未找到匹配的文档", new ArrayList<>());
             }
 
-            // 🎯 获取完整文档信息
-            List<Map<String, Object>> documents = documentService.getDocumentsWithDetailsByIds(docIds, userId);
-            System.out.println("✅ 获取到 " + documents.size() + " 个文档详情");
+            // 🎯 转换为标准DTO格式
+            List<SearchResultDTO> results = convertToSearchResultDTO(docIds, userId);
+            System.out.println("✅ 获取到 " + results.size() + " 个搜索结果");
 
             // 记录搜索统计
-            logSearchStatistics(documents, keyword, categoryId, tagId);
+            logSearchStatistics(results, keyword, categoryId, tagIds);
 
-            return JsonResult.success("智能搜索完成", documents);
+            return JsonResult.success("智能搜索完成", results);
         } catch (Exception e) {
             System.err.println("❌ 智能搜索失败: " + e.getMessage());
             e.printStackTrace();
@@ -239,24 +252,25 @@ public class SearchController {
     }
 
     /**
-     * 🎯 新增：快速搜索（不带筛选条件，用于全局搜索框）
+     * 🎯 新增：快速搜索（带排序）
      */
     @GetMapping("/quick")
-    public JsonResult<List<Map<String, Object>>> quickSearch(@RequestParam String keyword,
-                                                             @RequestParam Long userId,
-                                                             @RequestParam(defaultValue = "20") int limit) {
-        System.out.println("⚡ 快速搜索: '" + keyword + "'");
+    public JsonResult<List<SearchResultDTO>> quickSearch(@RequestParam String keyword,
+                                                         @RequestParam Long userId,
+                                                         @RequestParam(defaultValue = "20") int limit,
+                                                         @RequestParam(defaultValue = "relevance") String sortBy) {
+        System.out.println("⚡ 快速搜索: '" + keyword + "', 排序: " + sortBy);
 
         try {
             // 使用基础搜索但限制结果数
-            List<Long> docIds = searchService.search(keyword, userId, Math.min(limit, 20));
+            List<Long> docIds = searchService.search(keyword, userId, Math.min(limit, 20), sortBy);
 
             if (docIds.isEmpty()) {
                 return JsonResult.success("未找到相关文档", new ArrayList<>());
             }
 
-            List<Map<String, Object>> documents = documentService.getDocumentsWithDetailsByIds(docIds, userId);
-            return JsonResult.success("快速搜索完成", documents);
+            List<SearchResultDTO> results = convertToSearchResultDTO(docIds, userId);
+            return JsonResult.success("快速搜索完成", results);
         } catch (Exception e) {
             System.err.println("快速搜索失败: " + e.getMessage());
             return JsonResult.error("快速搜索失败: " + e.getMessage());
@@ -285,61 +299,159 @@ public class SearchController {
         }
     }
 
-    // ========== 辅助方法 ==========
-
     /**
-     * 记录文档详情（调试用）
+     * 🎯 新增：将文档ID列表转换为标准搜索结果的DTO
      */
-    private void logDocumentDetails(List<Map<String, Object>> documents) {
-        if (documents.isEmpty()) return;
+    private List<SearchResultDTO> convertToSearchResultDTO(List<Long> docIds, Long userId) {
+        System.out.println("🔄 开始转换搜索结果，文档ID数量: " + docIds.size());
 
-        Map<String, Object> firstDoc = documents.get(0);
-        System.out.println("📝 文档结构调试信息:");
-        System.out.println("  🔑 所有字段: " + firstDoc.keySet());
+        // 获取文档详情
+        List<Map<String, Object>> documents = documentService.getDocumentsWithDetailsByIds(docIds, userId);
 
-        // 检查关键字段
-        String[] criticalFields = {"id", "title", "content", "categoryId", "tags", "updatedTime"};
-        for (String field : criticalFields) {
-            Object value = firstDoc.get(field);
-            System.out.println("  📌 " + field + ": " +
-                    (value != null ? value.toString() : "null") +
-                    " (类型: " + (value != null ? value.getClass().getSimpleName() : "null") + ")");
+        if (documents == null || documents.isEmpty()) {
+            System.out.println("⚠️ 未获取到文档详情");
+            return new ArrayList<>();
         }
 
-        // 检查标签字段
-        Object tags = firstDoc.get("tags");
-        if (tags != null) {
-            System.out.println("  🏷️  标签详情: " + tags);
-            if (tags instanceof List) {
-                System.out.println("  📊 标签数量: " + ((List<?>) tags).size());
+        List<SearchResultDTO> results = new ArrayList<>();
+
+        for (Map<String, Object> doc : documents) {
+            try {
+                SearchResultDTO dto = SearchResultDTO.builder()
+                        .id(getLongValue(doc, "id"))
+                        .title(getStringValue(doc, "title", "无标题"))
+                        .contentPreview(getContentPreview(getStringValue(doc, "content", "")))
+                        .categoryId(getLongValue(doc, "categoryId"))
+                        .categoryName(getStringValue(doc, "categoryName", "未分类"))
+                        .tags(convertToTagDTOs(doc))
+                        .createdTime(getLocalDateTimeValue(doc, "createdTime"))
+                        .updatedTime(getLocalDateTimeValue(doc, "updatedTime"))
+                        .contentType(getStringValue(doc, "contentType", "TEXT"))
+                        .relevanceScore(0.8) // 暂时固定值，后续可从Lucene获取
+                        .build();
+
+                results.add(dto);
+                System.out.println("✅ 转换文档: " + dto.getTitle() + " (ID: " + dto.getId() + ")");
+
+            } catch (Exception e) {
+                System.err.println("❌ 转换文档失败: " + doc.get("id") + " - " + e.getMessage());
             }
         }
+
+        System.out.println("🎉 成功转换 " + results.size() + " 个搜索结果");
+        return results;
+    }
+
+    /**
+     * 🎯 新增：内容预览生成
+     */
+    private String getContentPreview(String content) {
+        if (content == null || content.trim().isEmpty()) {
+            return "无内容";
+        }
+
+        // 移除HTML标签
+        String plainText = content.replaceAll("<[^>]*>", "");
+
+        // 限制长度
+        int maxLength = 200;
+        if (plainText.length() <= maxLength) {
+            return plainText;
+        }
+
+        return plainText.substring(0, maxLength) + "...";
+    }
+
+    /**
+     * 🎯 新增：转换为TagDTO列表
+     */
+    private List<TagDTO> convertToTagDTOs(Map<String, Object> doc) {
+        try {
+            Object tagsObj = doc.get("tagList");
+            if (tagsObj instanceof List) {
+                List<?> tagList = (List<?>) tagsObj;
+                return tagList.stream()
+                        .filter(item -> item instanceof Tag)
+                        .map(item -> {
+                            Tag tag = (Tag) item;
+                            return TagDTO.builder()
+                                    .id(tag.getId())
+                                    .name(tag.getName())
+                                    .build();
+                        })
+                        .collect(Collectors.toList());
+            }
+
+            // 备用：从tagNames转换
+            Object tagNamesObj = doc.get("tags");
+            if (tagNamesObj instanceof List) {
+                List<?> tagNamesList = (List<?>) tagNamesObj;
+                return tagNamesList.stream()
+                        .filter(item -> item instanceof String)
+                        .map(item -> TagDTO.builder()
+                                .id(0L) // 没有ID
+                                .name((String) item)
+                                .build())
+                        .collect(Collectors.toList());
+            }
+        } catch (Exception e) {
+            System.err.println("转换标签失败: " + e.getMessage());
+        }
+
+        return new ArrayList<>();
+    }
+
+    // ========== 辅助方法 ==========
+
+    private String getStringValue(Map<String, Object> map, String key, String defaultValue) {
+        Object value = map.get(key);
+        return value != null ? value.toString() : defaultValue;
+    }
+
+    private Long getLongValue(Map<String, Object> map, String key) {
+        Object value = map.get(key);
+        if (value == null) return null;
+        try {
+            if (value instanceof Number) {
+                return ((Number) value).longValue();
+            }
+            return Long.parseLong(value.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private java.time.LocalDateTime getLocalDateTimeValue(Map<String, Object> map, String key) {
+        Object value = map.get(key);
+        if (value == null) return null;
+        if (value instanceof java.time.LocalDateTime) {
+            return (java.time.LocalDateTime) value;
+        }
+        return null;
     }
 
     /**
      * 记录搜索统计信息
      */
-    private void logSearchStatistics(List<Map<String, Object>> documents, String keyword,
-                                     Long categoryId, Long tagId) {
+    private void logSearchStatistics(List<SearchResultDTO> results, String keyword,
+                                     Long categoryId, List<Long> tagIds) {
         System.out.println("📈 搜索统计信息:");
-        System.out.println("  • 结果数量: " + documents.size());
+        System.out.println("  • 结果数量: " + results.size());
         System.out.println("  • 关键词: '" + keyword + "'");
         if (categoryId != null) {
             System.out.println("  • 分类ID: " + categoryId);
         }
-        if (tagId != null) {
-            System.out.println("  • 标签ID: " + tagId);
+        if (tagIds != null && !tagIds.isEmpty()) {
+            System.out.println("  • 标签IDs: " + tagIds);
         }
 
         // 统计标签分布
-        if (!documents.isEmpty()) {
+        if (!results.isEmpty()) {
             Map<String, Integer> tagDistribution = new HashMap<>();
-            for (Map<String, Object> doc : documents) {
-                Object tags = doc.get("tags");
-                if (tags instanceof List) {
-                    for (Object tag : (List<?>) tags) {
-                        String tagName = tag.toString();
-                        tagDistribution.put(tagName, tagDistribution.getOrDefault(tagName, 0) + 1);
+            for (SearchResultDTO result : results) {
+                if (result.getTags() != null) {
+                    for (TagDTO tag : result.getTags()) {
+                        tagDistribution.put(tag.getName(), tagDistribution.getOrDefault(tag.getName(), 0) + 1);
                     }
                 }
             }
@@ -349,17 +461,11 @@ public class SearchController {
         }
     }
 
-    /**
-     * 从Map中提取字符串
-     */
     private String extractString(Map<String, Object> map, String key) {
         Object value = map.get(key);
         return value != null ? value.toString() : null;
     }
 
-    /**
-     * 从Map中提取Long
-     */
     private Long extractLong(Map<String, Object> map, String key) {
         Object value = map.get(key);
         if (value == null) return null;
@@ -374,9 +480,6 @@ public class SearchController {
         }
     }
 
-    /**
-     * 从Map中提取Int
-     */
     private int extractInt(Map<String, Object> map, String key, int defaultValue) {
         Object value = map.get(key);
         if (value == null) return defaultValue;
@@ -391,9 +494,6 @@ public class SearchController {
         }
     }
 
-    /**
-     * 从Map中提取标签ID列表
-     */
     @SuppressWarnings("unchecked")
     private List<Long> extractTagIds(Map<String, Object> map) {
         Object value = map.get("tagIds");
@@ -418,5 +518,19 @@ public class SearchController {
         return null;
     }
 
-    // 其他方法保持不变...
+    /**
+     * 🎯 新增：测试标签搜索功能
+     */
+    @GetMapping("/test/tag-search")
+    public JsonResult<List<Long>> testTagSearch(@RequestParam List<Long> tagIds,
+                                                @RequestParam Long userId) {
+        try {
+            System.out.println("测试标签搜索: 标签IDs=" + tagIds + ", 用户ID=" + userId);
+            List<Long> results = searchService.testTagSearch(tagIds, userId);
+            return JsonResult.success("标签搜索测试完成", results);
+        } catch (Exception e) {
+            System.err.println("标签搜索测试失败: " + e.getMessage());
+            return JsonResult.error("标签搜索测试失败: " + e.getMessage());
+        }
+    }
 }

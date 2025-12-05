@@ -2,7 +2,7 @@ package com.dzy666.demo.service;
 
 import java.time.LocalDateTime;
 import com.dzy666.demo.entity.Category;
-import com.dzy666.demo.entity.Document; // 添加 Document 导入
+import com.dzy666.demo.entity.Document;
 import com.dzy666.demo.mapper.CategoryMapper;
 import com.dzy666.demo.mapper.DocumentMapper;
 import org.springframework.stereotype.Service;
@@ -22,7 +22,6 @@ public class CategoryService {
         this.documentMapper = documentMapper;
     }
 
-    // 原有方法保持不变...
     @Transactional
     public Category createCategory(Category category) {
         try {
@@ -43,7 +42,7 @@ public class CategoryService {
                 System.out.println("设置默认排序值: 0");
             }
 
-            // 设置创建时间 - 使用 LocalDateTime.now()
+            // 设置创建时间
             category.setCreatedTime(LocalDateTime.now());
             System.out.println("设置创建时间: " + category.getCreatedTime());
 
@@ -57,7 +56,7 @@ public class CategoryService {
                 System.out.println("分类创建成功，生成的ID: " + category.getId());
 
                 // 重新从数据库查询以确保数据完整
-                Category savedCategory = categoryMapper.selectByIdAndUser(category.getId(), category.getUserId());
+                Category savedCategory = getCategoryById(category.getId(), category.getUserId());
                 System.out.println("从数据库查询到的分类: " + savedCategory);
 
                 System.out.println("=== CategoryService.createCategory 完成 ===");
@@ -75,24 +74,45 @@ public class CategoryService {
     }
 
     public Category getCategoryById(Long id, Long userId) {
-        return categoryMapper.selectByIdAndUser(id, userId);
+        // 获取基础分类信息
+        Category category = categoryMapper.selectByIdAndUser(id, userId);
+        if (category != null) {
+            // 设置文档数量
+            int docCount = categoryMapper.countDocumentsInCategory(id, userId);
+            category.setDocumentCount(docCount);
+        }
+        return category;
     }
 
     public List<Category> getUserCategories(Long userId) {
-        return categoryMapper.selectByUserId(userId);
+        // 使用带文档数量的查询方法
+        return categoryMapper.selectWithDocumentCount(userId);
     }
 
     public List<Category> getRootCategories(Long userId) {
-        return categoryMapper.selectRootCategories(userId);
+        // 获取根分类并设置文档数量
+        List<Category> rootCategories = categoryMapper.selectRootCategories(userId);
+        for (Category category : rootCategories) {
+            int docCount = categoryMapper.countDocumentsInCategory(category.getId(), userId);
+            category.setDocumentCount(docCount);
+        }
+        return rootCategories;
     }
 
     public List<Category> getChildCategories(Long userId, Long parentId) {
-        return categoryMapper.selectByParentId(userId, parentId);
+        // 获取子分类并设置文档数量
+        List<Category> childCategories = categoryMapper.selectByParentId(userId, parentId);
+        for (Category category : childCategories) {
+            int docCount = categoryMapper.countDocumentsInCategory(category.getId(), userId);
+            category.setDocumentCount(docCount);
+        }
+        return childCategories;
     }
 
     public Category updateCategory(Category category) {
         categoryMapper.update(category);
-        return categoryMapper.selectByIdAndUser(category.getId(), category.getUserId());
+        // 返回更新后的分类，包含文档数量
+        return getCategoryById(category.getId(), category.getUserId());
     }
 
     public boolean deleteCategory(Long id, Long userId) {
@@ -112,16 +132,41 @@ public class CategoryService {
     }
 
     /**
-     * 构建分类树形结构
+     * 构建分类树形结构（带文档数量）
      */
     public List<Category> getCategoryTree(Long userId) {
-        List<Category> rootCategories = getRootCategories(userId);
-        for (Category rootCategory : rootCategories) {
-            buildCategoryTree(rootCategory, userId);
+        // 获取所有分类（带文档数量）
+        List<Category> allCategories = getUserCategories(userId);
+
+        // 创建ID到分类的映射
+        Map<Long, Category> categoryMap = new HashMap<>();
+        List<Category> rootCategories = new ArrayList<>();
+
+        // 第一遍：建立映射并找到根分类
+        for (Category category : allCategories) {
+            categoryMap.put(category.getId(), category);
+            if (category.getParentId() == null) {
+                rootCategories.add(category);
+            }
         }
+
+        // 第二遍：建立树形结构
+        for (Category category : allCategories) {
+            if (category.getParentId() != null && categoryMap.containsKey(category.getParentId())) {
+                Category parent = categoryMap.get(category.getParentId());
+                if (parent.getChildren() == null) {
+                    parent.setChildren(new ArrayList<>());
+                }
+                parent.getChildren().add(category);
+            }
+        }
+
         return rootCategories;
     }
 
+    /**
+     * 递归构建分类树（旧方法，保持兼容性）
+     */
     private void buildCategoryTree(Category parentCategory, Long userId) {
         List<Category> children = getChildCategories(userId, parentCategory.getId());
         parentCategory.setChildren(children);
@@ -131,11 +176,8 @@ public class CategoryService {
         }
     }
 
-    // 🔄 新增方法 - 分类排序、移动、统计功能
+    // 🔄 分类排序、移动、统计功能
 
-    /**
-     * 更新分类顺序
-     */
     @Transactional
     public boolean updateCategoryOrder(List<Map<String, Object>> categoryOrders, Long userId) {
         try {
@@ -143,7 +185,6 @@ public class CategoryService {
                 Long categoryId = Long.valueOf(order.get("categoryId").toString());
                 Integer sortOrder = Integer.valueOf(order.get("sortOrder").toString());
 
-                // 更新分类排序
                 int result = categoryMapper.updateSortOrder(categoryId, userId, sortOrder);
                 if (result <= 0) {
                     throw new RuntimeException("更新分类排序失败: " + categoryId);
@@ -155,14 +196,10 @@ public class CategoryService {
         }
     }
 
-    /**
-     * 移动分类到新的父分类
-     */
     @Transactional
     public Category moveCategory(Long categoryId, Long newParentId, Long userId) {
         try {
-            // 检查目标分类是否存在且属于同一用户
-            Category targetCategory = categoryMapper.selectByIdAndUser(categoryId, userId);
+            Category targetCategory = getCategoryById(categoryId, userId);
             if (targetCategory == null) {
                 throw new RuntimeException("分类不存在");
             }
@@ -172,14 +209,17 @@ public class CategoryService {
                 throw new RuntimeException("不能将分类移动到其子分类中");
             }
 
-            // 更新父分类ID
+            // 检查是否尝试移动到自己的子分类
+            if (newParentId != null && isParentOf(categoryId, newParentId, userId)) {
+                throw new RuntimeException("不能将分类移动到自己的子分类中");
+            }
+
             int result = categoryMapper.updateParentId(categoryId, userId, newParentId);
             if (result <= 0) {
                 throw new RuntimeException("移动分类失败");
             }
 
-            // 返回更新后的分类
-            return categoryMapper.selectByIdAndUser(categoryId, userId);
+            return getCategoryById(categoryId, userId);
         } catch (Exception e) {
             throw new RuntimeException("移动分类失败: " + e.getMessage(), e);
         }
@@ -203,11 +243,22 @@ public class CategoryService {
     }
 
     /**
-     * 获取分类的所有子分类（包括子分类的子分类）
+     * 检查一个分类是否是另一个分类的父分类
      */
+    private boolean isParentOf(Long parentId, Long childId, Long userId) {
+        Category current = getCategoryById(childId, userId);
+        while (current != null && current.getParentId() != null) {
+            if (current.getParentId().equals(parentId)) {
+                return true;
+            }
+            current = getCategoryById(current.getParentId(), userId);
+        }
+        return false;
+    }
+
     private List<Category> getAllChildren(Long parentId, Long userId) {
         List<Category> allChildren = new ArrayList<>();
-        List<Category> directChildren = categoryMapper.selectByParentId(userId, parentId);
+        List<Category> directChildren = getChildCategories(userId, parentId);
 
         for (Category child : directChildren) {
             allChildren.add(child);
@@ -217,13 +268,10 @@ public class CategoryService {
         return allChildren;
     }
 
-    /**
-     * 获取分类统计信息
-     */
     public Map<String, Object> getCategoryStatistics(Long userId) {
         Map<String, Object> stats = new HashMap<>();
 
-        List<Category> categories = categoryMapper.selectByUserId(userId);
+        List<Category> categories = getUserCategories(userId);
 
         // 基本统计
         stats.put("totalCategories", categories.size());
@@ -238,7 +286,7 @@ public class CategoryService {
         int totalDocuments = 0;
 
         for (Category category : categories) {
-            int docCount = categoryMapper.countDocumentsInCategory(category.getId(), userId);
+            int docCount = category.getDocumentCount() != null ? category.getDocumentCount() : 0;
             documentDistribution.put(category.getName(), docCount);
             totalDocuments += docCount;
         }
@@ -256,9 +304,6 @@ public class CategoryService {
         return stats;
     }
 
-    /**
-     * 计算分类树的最大深度
-     */
     private int calculateMaxDepth(List<Category> categories) {
         int maxDepth = 0;
         for (Category category : categories) {
@@ -284,13 +329,10 @@ public class CategoryService {
         return maxChildDepth;
     }
 
-    /**
-     * 获取分类下的文档数量统计
-     */
     public Map<String, Object> getCategoryDocumentCount(Long categoryId, Long userId) {
         Map<String, Object> countInfo = new HashMap<>();
 
-        Category category = categoryMapper.selectByIdAndUser(categoryId, userId);
+        Category category = getCategoryById(categoryId, userId);
         if (category == null) {
             throw new RuntimeException("分类不存在");
         }
@@ -309,32 +351,23 @@ public class CategoryService {
         return countInfo;
     }
 
-    /**
-     * 递归计算子分类的文档数量
-     */
     private int calculateChildDocumentCount(Long parentId, Long userId) {
         int total = 0;
-        List<Category> children = categoryMapper.selectByParentId(userId, parentId);
+        List<Category> children = getChildCategories(userId, parentId);
 
         for (Category child : children) {
-            // 直接文档数量
-            total += categoryMapper.countDocumentsInCategory(child.getId(), userId);
-            // 递归计算子分类的文档数量
+            total += child.getDocumentCount() != null ? child.getDocumentCount() : 0;
             total += calculateChildDocumentCount(child.getId(), userId);
         }
 
         return total;
     }
 
-    /**
-     * 批量更新分类
-     */
     @Transactional
     public boolean batchUpdateCategories(List<Category> categories, Long userId) {
         try {
             for (Category category : categories) {
-                // 验证分类属于该用户
-                Category existing = categoryMapper.selectByIdAndUser(category.getId(), userId);
+                Category existing = getCategoryById(category.getId(), userId);
                 if (existing == null) {
                     throw new RuntimeException("分类不存在或无权访问: " + category.getId());
                 }
@@ -350,11 +383,8 @@ public class CategoryService {
         }
     }
 
-    /**
-     * 获取分类使用频率统计
-     */
     public List<Map<String, Object>> getCategoryUsageFrequency(Long userId) {
-        List<Category> categories = categoryMapper.selectByUserId(userId);
+        List<Category> categories = getUserCategories(userId);
 
         return categories.stream()
                 .map(category -> {
@@ -362,10 +392,9 @@ public class CategoryService {
                     frequency.put("categoryId", category.getId());
                     frequency.put("categoryName", category.getName());
 
-                    int documentCount = categoryMapper.countDocumentsInCategory(category.getId(), userId);
+                    int documentCount = category.getDocumentCount() != null ? category.getDocumentCount() : 0;
                     frequency.put("documentCount", documentCount);
 
-                    // 计算使用频率等级
                     String frequencyLevel;
                     if (documentCount >= 10) frequencyLevel = "高频";
                     else if (documentCount >= 5) frequencyLevel = "中频";
@@ -384,11 +413,7 @@ public class CategoryService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * 获取分类最后使用时间
-     */
     private LocalDateTime getLastUsedTime(Long categoryId, Long userId) {
-        // 这里可以查询该分类下文档的最新创建或修改时间
         List<Document> documents = documentMapper.selectByCategoryIdAndUser(categoryId, userId);
         if (documents == null || documents.isEmpty()) {
             return null;
@@ -401,12 +426,113 @@ public class CategoryService {
     }
 
     /**
-     * 搜索分类
+     * 搜索分类（带文档数量）
      */
     public List<Category> searchCategories(String keyword, Long userId) {
-        // 使用 Mapper 的搜索方法
-        return categoryMapper.searchByName(keyword, userId);
+        List<Category> categories = categoryMapper.searchByName(keyword, userId);
+        // 为搜索结果设置文档数量
+        for (Category category : categories) {
+            int docCount = categoryMapper.countDocumentsInCategory(category.getId(), userId);
+            category.setDocumentCount(docCount);
+        }
+        return categories;
     }
 
+    @Transactional
+    public boolean batchDeleteCategories(List<Long> categoryIds, Long userId) {
+        try {
+            int successCount = 0;
+            List<String> errorMessages = new ArrayList<>();
 
+            for (Long categoryId : categoryIds) {
+                try {
+                    boolean deleted = deleteCategory(categoryId, userId);
+                    if (deleted) {
+                        successCount++;
+                    }
+                } catch (Exception e) {
+                    Category category = getCategoryById(categoryId, userId);
+                    String categoryName = category != null ? category.getName() : "未知分类";
+                    errorMessages.add(categoryName + ": " + e.getMessage());
+                }
+            }
+
+            if (successCount > 0 && errorMessages.isEmpty()) {
+                return true;
+            } else if (successCount > 0) {
+                String errorMsg = "成功删除 " + successCount + " 个分类，失败 " + errorMessages.size() + " 个";
+                throw new RuntimeException(errorMsg + "。详情: " + String.join("; ", errorMessages));
+            } else {
+                throw new RuntimeException("删除全部失败: " + String.join("; ", errorMessages));
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("批量删除分类失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Transactional
+    public boolean batchMoveCategories(List<Long> categoryIds, Long newParentId, Long userId) {
+        try {
+            int successCount = 0;
+            List<String> errorMessages = new ArrayList<>();
+
+            for (Long categoryId : categoryIds) {
+                try {
+                    Category movedCategory = moveCategory(categoryId, newParentId, userId);
+                    if (movedCategory != null) {
+                        successCount++;
+                    }
+                } catch (Exception e) {
+                    Category category = getCategoryById(categoryId, userId);
+                    String categoryName = category != null ? category.getName() : "未知分类";
+                    errorMessages.add(categoryName + ": " + e.getMessage());
+                }
+            }
+
+            if (successCount > 0 && errorMessages.isEmpty()) {
+                return true;
+            } else if (successCount > 0) {
+                String errorMsg = "成功移动 " + successCount + " 个分类，失败 " + errorMessages.size() + " 个";
+                throw new RuntimeException(errorMsg + "。详情: " + String.join("; ", errorMessages));
+            } else {
+                throw new RuntimeException("移动全部失败: " + String.join("; ", errorMessages));
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("批量移动分类失败: " + e.getMessage(), e);
+        }
+    }
+
+    // 新增：获取分类树的高效方法（使用一次查询）
+    public List<Category> getCategoryTreeOptimized(Long userId) {
+        // 获取所有分类（带文档数量）
+        List<Category> allCategories = getUserCategories(userId);
+
+        // 创建ID到分类的映射
+        Map<Long, Category> categoryMap = new HashMap<>();
+        List<Category> rootCategories = new ArrayList<>();
+
+        // 第一遍：建立映射并找到根分类
+        for (Category category : allCategories) {
+            categoryMap.put(category.getId(), category);
+            if (category.getParentId() == null) {
+                rootCategories.add(category);
+            } else {
+                // 确保子分类的children列表被初始化
+                category.setChildren(new ArrayList<>());
+            }
+        }
+
+        // 第二遍：建立树形结构
+        for (Category category : allCategories) {
+            if (category.getParentId() != null && categoryMap.containsKey(category.getParentId())) {
+                Category parent = categoryMap.get(category.getParentId());
+                if (parent.getChildren() == null) {
+                    parent.setChildren(new ArrayList<>());
+                }
+                parent.getChildren().add(category);
+            }
+        }
+
+        return rootCategories;
+    }
 }

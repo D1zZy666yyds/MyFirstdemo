@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 </head>
 <body>
 <div id="app">
@@ -29,7 +30,7 @@
             </a>
             <a href="#favorites" class="nav-item" id="favorites-link">
                 我的收藏
-                <span id="favorites-badge" class="favorites-badge" style="display: none;"></span>
+                <span id="favorites-manager" class="favorites-badge" style="display: none;"></span>
             </a>
         </nav>
         <div class="nav-user">
@@ -101,72 +102,357 @@
                 <button onclick="showCreateDocumentModal()" class="btn-primary">新建文档</button>
             </div>
             <div class="toolbar">
-                <select id="category-filter" class="filter-select">
-                    <option value="">全部分类</option>
-                </select>
+                <div class="filter-group">
+                    <select id="category-filter" class="filter-select">
+                        <option value="">全部分类</option>
+                    </select>
+                    <select id="tag-filter" class="filter-select">
+                        <option value="">全部标签</option>
+                    </select>
+                    <button onclick="clearFilters()" class="btn-secondary filter-clear-btn" id="clear-filters" style="display: none;">
+                        ✕ 清除筛选
+                    </button>
+                </div>
             </div>
-            <div id="documents-list" class="documents-grid"></div>
+
+            <!-- 批量操作栏 -->
+            <div class="batch-actions" style="display: none;">
+                <div class="batch-info">
+                    <span class="selected-count">已选择 0 个文档</span>
+                </div>
+                <div class="batch-buttons">
+                    <button class="select-all-btn btn-outline">
+                        <i class="far fa-check-square"></i> 全选
+                    </button>
+                    <button class="batch-delete-btn btn-danger" disabled>
+                        <i class="far fa-trash-alt"></i> 批量删除
+                    </button>
+                </div>
+            </div>
+
+            <!-- 文档列表 -->
+            <div id="documents-list" class="documents-grid">
+                <!-- 文档卡片将在这里动态生成 -->
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <p>正在加载文档...</p>
+                </div>
+            </div>
         </div>
 
         <!-- 分类管理页面 -->
         <div id="categories-page" class="page">
-            <div class="page-header">
-                <h2>分类管理</h2>
-                <button onclick="showCreateCategoryModal()" class="btn-primary">新建分类</button>
+            <!-- 页面头部 -->
+            <div class="categories-page-header">
+                <div class="header-content">
+                    <div>
+                        <h1>分类管理</h1>
+                        <p style="color: var(--neutral-500); margin-top: 0.5rem; font-size: 0.875rem;">
+                            使用分类组织您的知识，构建清晰的层级结构
+                        </p>
+                    </div>
+                    <div class="categories-stats">
+                        <div class="categories-stat-item">
+                            <div class="categories-stat-number" id="categories-total">0</div>
+                            <div class="categories-stat-label">分类总数</div>
+                        </div>
+                        <div class="categories-stat-item">
+                            <div class="categories-stat-number" id="categories-root">0</div>
+                            <div class="categories-stat-label">根分类</div>
+                        </div>
+                        <div class="categories-stat-item">
+                            <div class="categories-stat-number" id="categories-depth">0</div>
+                            <div class="categories-stat-label">最大深度</div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div id="category-tree" class="category-tree"></div>
-        </div>
 
+            <!-- 工具栏 -->
+            <div class="categories-toolbar">
+                <div class="toolbar-left">
+                    <div class="categories-search-container">
+                        <span class="categories-search-icon">🔍</span>
+                        <input type="text"
+                               id="category-search"
+                               class="categories-search-input"
+                               placeholder="搜索分类名称...">
+                    </div>
+                    <div class="categories-filter-group">
+                        <select id="category-sort" class="categories-filter-select">
+                            <option value="name">按名称排序</option>
+                            <option value="count">按文档数量</option>
+                            <option value="created">按创建时间</option>
+                            <option value="updated">按更新时间</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="toolbar-right">
+                    <button onclick="showCreateCategoryModal()" class="btn-primary">
+                        <span>+ 新建分类</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 批量操作栏 -->
+            <div class="categories-batch-actions">
+                <span class="selected-count">已选择 <span id="selected-count">0</span> 个分类</span>
+                <button onclick="categoryManager.handleBatchDelete()" class="btn btn-danger btn-sm">
+                    <span>批量删除</span>
+                </button>
+                <button onclick="categoryManager.handleBatchMove()" class="btn btn-secondary btn-sm">
+                    <span>批量移动</span>
+                </button>
+                <button onclick="categoryManager.clearSelection()" class="btn btn-outline btn-sm">
+                    <span>取消选择</span>
+                </button>
+            </div>
+
+            <!-- 分类树 -->
+            <div class="category-tree-container">
+                <div id="category-tree" class="category-tree">
+                    <!-- 分类树将在这里动态生成 -->
+                    <div class="categories-loading">
+                        <div class="loading-category"></div>
+                        <div class="loading-category"></div>
+                        <div class="loading-category"></div>
+                        <p style="color: var(--neutral-500); font-size: 0.875rem;">正在加载分类树...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
         <!-- 搜索页面 -->
         <div id="search-page" class="page">
-            <div class="search-header">
+            <div class="search-page-header">
+                <div class="header-content">
+                    <div>
+                        <h1>智能搜索</h1>
+                        <p style="color: var(--neutral-500); margin-top: 0.5rem; font-size: 0.875rem;">
+                            在您的知识库中快速查找文档，支持关键词、分类、标签组合搜索
+                        </p>
+                    </div>
+                    <div class="search-stats">
+                        <div class="stat-item">
+                            <span>历史记录:</span>
+                            <span class="stat-value" id="history-count">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span>最近搜索:</span>
+                            <span class="stat-value" id="recent-search">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 主搜索区域 -->
+            <div class="search-hero">
                 <div class="search-input-container">
-                    <input type="text" id="global-search" placeholder="输入关键词搜索..." class="search-input-large">
-                    <button onclick="app.performSearch()" class="btn-primary">搜索</button>
+                    <span class="search-icon">🔍</span>
+                    <input type="text"
+                           id="global-search"
+                           placeholder="输入关键词搜索文档..."
+                           class="search-input-large"
+                           autocomplete="off"
+                           aria-label="搜索输入框">
+                    <button onclick="app.performSearch()" class="btn-primary" style="padding: 0.875rem 1.5rem;">
+                        搜索
+                    </button>
+                </div>
+                <!-- 删除搜索建议容器 -->
+                <!-- <div id="search-suggestions" class="search-suggestions"></div> -->
+
+                <!-- 删除快捷键提示 -->
+                <!-- <div class="search-shortcuts">
+                    <span class="shortcut-hint">
+                        <kbd>Enter</kbd> 执行搜索 • <kbd>↑</kbd><kbd>↓</kbd> 选择建议 • <kbd>Esc</kbd> 清除搜索
+                    </span>
+                </div> -->
+            </div>
+
+            <!-- 优化后的高级筛选器 -->
+            <div class="advanced-filters compact" id="advanced-filters">
+                <div class="filter-header" onclick="app.toggleAdvancedFilters()">
+                    <h3>
+                        <i class="fas fa-sliders-h"></i>
+                        高级筛选
+                    </h3>
+                    <span class="toggle-icon">▼</span>
+                </div>
+                <div class="filter-content compact" id="filter-content" style="display: none;">
+                    <div class="filter-groups-row">
+                        <div class="filter-group compact">
+                            <label class="filter-label compact">
+                                <i class="fas fa-filter"></i>
+                                分类
+                            </label>
+                            <select id="search-category" class="filter-select compact">
+                                <option value="">全部分类</option>
+                            </select>
+                        </div>
+
+                        <div class="filter-group compact">
+                            <label class="filter-label compact">
+                                <i class="fas fa-tag"></i>
+                                标签
+                            </label>
+                            <select id="search-tag" class="filter-select compact">
+                                <option value="">全部标签</option>
+                            </select>
+                        </div>
+
+                        <div class="filter-group compact">
+                            <label class="filter-label compact">
+                                <i class="fas fa-sort"></i>
+                                排序
+                            </label>
+                            <select id="search-sort" class="filter-select compact" onchange="app.performSearch()">
+                                <option value="relevance">按相关性</option>
+                                <option value="date_desc">时间倒序</option>
+                                <option value="date_asc">时间正序</option>
+                                <option value="title">按标题</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- 搜索状态显示区域 -->
-            <div class="search-status" id="search-status" style="display: none;">
-                <div class="status-info">
-                    <span id="current-filters"></span>
-                    <button onclick="app.clearSearchFilters()" class="btn-small btn-secondary">清除筛选</button>
+            <!-- 搜索状态栏 - 横向布局 -->
+            <div class="search-status-bar horizontal-layout" id="search-status" style="display: none;">
+                <div class="search-stats horizontal-stats">
+                    <div class="stat-item horizontal-item">
+                        <span class="stat-label">找到结果:</span>
+                        <span class="stat-value" id="results-count">0</span>
+                    </div>
+                    <div class="stat-item horizontal-item">
+                        <span class="stat-label">关键词:</span>
+                        <span class="stat-value" id="search-keyword">-</span>
+                    </div>
+                    <div class="stat-item horizontal-item">
+                        <span class="stat-label">筛选条件:</span>
+                        <span class="stat-value" id="filter-conditions">无</span>
+                    </div>
+                </div>
+                <div class="search-actions horizontal-actions">
+                    <button onclick="app.clearSearchFilters()" class="btn-secondary">
+                        <i class="fas fa-times"></i> 清除筛选
+                    </button>
                 </div>
             </div>
 
-            <div class="search-filters">
-                <select id="search-category" class="filter-select">
-                    <option value="">全部分类</option>
-                </select>
-                <select id="search-tag" class="filter-select">
-                    <option value="">全部标签</option>
-                </select>
-                <button onclick="app.clearSearchFilters()" class="btn-secondary">清除筛选</button>
+            <!-- 搜索历史 -->
+            <div class="search-history-container">
+                <div class="search-history-header">
+                    <h4>
+                        <i class="fas fa-history"></i>
+                        搜索历史
+                        <span class="results-count" id="history-count-badge">0</span>
+                    </h4>
+                    <button onclick="app.clearSearchHistory()" class="btn-secondary btn-sm">
+                        <i class="fas fa-trash-alt"></i> 清空历史
+                    </button>
+                </div>
+                <div id="search-history" class="history-items">
+                    <!-- 搜索历史将通过JavaScript动态生成 -->
+                </div>
             </div>
 
-            <div id="search-history" class="search-history-container"></div>
+            <!-- 搜索结果区域 -->
+            <div class="search-results-container">
+                <div class="results-header">
+                    <h3 class="results-title">搜索结果</h3>
+                    <span class="results-count" id="search-results-count">0 个结果</span>
+                </div>
 
-            <div id="search-results" class="search-results"></div>
+                <div id="search-results" class="results-list">
+                    <!-- 初始状态显示 -->
+                    <div class="search-init-state">
+                        <div class="no-results">
+                            <div class="no-results-icon">🔍</div>
+                            <h3>开始搜索</h3>
+                            <p>输入关键词查找您的文档，或使用高级筛选功能精确搜索</p>
+                            <div class="search-tips">
+                                <h4>搜索技巧：</h4>
+                                <ul>
+                                    <li>使用多个关键词进行组合搜索</li>
+                                    <li>使用引号进行精确匹配："关键词"</li>
+                                    <li>使用高级筛选缩小范围</li>
+                                    <li>查看搜索历史快速重搜</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <!-- 标签管理页面 -->
+        <!-- 标签页面结构 -->
         <div id="tags-page" class="page">
-            <div class="page-header">
-                <h2>标签管理</h2>
-                <button onclick="showCreateTagModal()" class="btn-primary">新建标签</button>
+            <!-- 页面头部 -->
+            <div class="tags-page-header">
+                <div class="header-content">
+                    <div>
+                        <h1>标签管理</h1>
+                        <p style="color: var(--neutral-500); margin-top: 0.5rem; font-size: 0.875rem;">
+                            管理您的文档标签，提升知识组织效率
+                        </p>
+                    </div>
+                    <div class="tags-stats">
+                        <div class="tags-stat-item">
+                            <div class="tags-stat-number" id="tags-total">0</div>
+                            <div class="tags-stat-label">标签总数</div>
+                        </div>
+                        <div class="tags-stat-item">
+                            <div class="tags-stat-number" id="tags-used">0</div>
+                            <div class="tags-stat-label">使用中</div>
+                        </div>
+                        <div class="tags-stat-item">
+                            <div class="tags-stat-number" id="tags-recent">0</div>
+                            <div class="tags-stat-label">7日内新增</div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <div class="toolbar">
-                <input type="text" id="tag-search" placeholder="搜索标签..." class="search-input">
-                <select id="tag-sort" class="filter-select">
-                    <option value="name">按名称排序</option>
-                    <option value="count">按文档数量排序</option>
-                    <option value="created">按创建时间排序</option>
-                </select>
+            <!-- 工具栏 -->
+            <div class="tags-toolbar">
+                <div class="toolbar-left">
+                    <div class="tags-search-container">
+                        <span class="tags-search-icon">🔍</span>
+                        <input type="text"
+                               id="tag-search"
+                               class="tags-search-input"
+                               placeholder="搜索标签名称...">
+                    </div>
+                    <div class="tags-filter-group">
+                        <select id="tag-sort" class="tags-filter-select">
+                            <option value="name">按名称排序</option>
+                            <option value="count">按文档数量</option>
+                            <option value="created">按创建时间</option>
+                            <option value="updated">按更新时间</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="toolbar-right">
+                    <button onclick="showCreateTagModal()" class="btn-primary">
+                        <span>+ 新建标签</span>
+                    </button>
+                </div>
             </div>
 
-            <div id="tags-container" class="tags-container">
+            <!-- 标签列表 -->
+            <div class="tags-list-container">
+                <!-- 列表头部 -->
+                <div class="tags-list-header">
+                    <div>标签信息</div>
+                    <div>关联文档</div>
+                    <div>操作</div>
+                </div>
+
+                <!-- 标签列表内容 -->
                 <div id="tags-list" class="tags-list"></div>
+
+                <!-- 分页 -->
+                <div id="tags-pagination" class="tags-pagination"></div>
             </div>
         </div>
 
@@ -185,13 +471,10 @@
                     <select id="graph-type" class="filter-select" onchange="window.knowledgeGraphManager.changeGraphType()">
                         <option value="full">全量图谱</option>
                         <option value="documents">文档关系</option>
-                        <option value="tags">标签云</option>
-                        <option value="learning">学习路径</option>
                     </select>
                     <select id="graph-layout" class="filter-select" onchange="window.knowledgeGraphManager.changeLayout()">
                         <option value="force">力导向布局</option>
                         <option value="circular">环形布局</option>
-                        <option value="grid">网格布局</option>
                     </select>
                     <input type="text" id="graph-search" placeholder="搜索节点..." class="search-input"
                            oninput="window.knowledgeGraphManager.searchNodes(this.value)">
@@ -240,22 +523,17 @@
                 <h2>
                     <span class="favorite-icon">❤️</span>
                     我的收藏
+                    <span id="favorites-badge" class="badge" style="display: none;">0</span>
                 </h2>
                 <div class="header-actions">
-                    <button class="btn-secondary btn-refresh-favorites">刷新</button>
+                    <button class="btn-secondary btn-refresh-favorites">🔄 刷新收藏</button>
                 </div>
             </div>
 
-            <div class="filters-toolbar">
-                <select id="favorites-category-filter" class="filter-select">
-                    <option value="">全部分类</option>
-                </select>
-                <select id="favorites-tag-filter" class="filter-select">
-                    <option value="">全部标签</option>
-                </select>
-                <input type="text" id="favorites-search" placeholder="在收藏中搜索..." class="search-input">
-            </div>
+            <!-- 筛选工具栏容器 -->
+            <div id="favorites-filters"></div>
 
+            <!-- 收藏内容区域 -->
             <div id="favorites-content" class="favorites-content">
                 <div class="loading-state">
                     <div class="spinner"></div>
@@ -263,14 +541,39 @@
                 </div>
             </div>
         </div>
+
+        <!-- 基础HTML结构中的其他必要元素 -->
+        <!-- 文档查看模态框（用于收藏按钮） -->
+        <div class="modal" style="display: none;">
+            <div class="modal-dialog">
+                <div class="modal-header">
+                    <h3 class="modal-title">文档详情</h3>
+                    <button class="modal-close">×</button>
+                </div>
+                <div class="modal-body">
+                    <!-- 文档内容会动态加载到这里 -->
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-secondary modal-close-btn">关闭</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 通知容器（可选，用于替代alert） -->
+        <div id="notification-container" class="notification-container" style="display: none;">
+            <div class="notification">
+                <span class="notification-icon"></span>
+                <span class="notification-message"></span>
+            </div>
+        </div>
     </main>
 </div>
 
 <!-- 模态框容器 -->
 <div id="modal-container"></div>
+<script src="https://unpkg.com/axios/dist/axios.min.js"></script>
 <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
-<script src="https://unpkg.com/axios/dist/axios.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <!-- EasyMDE 编辑器库 -->
 <script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>

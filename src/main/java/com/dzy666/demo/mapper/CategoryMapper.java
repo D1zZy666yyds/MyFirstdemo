@@ -66,4 +66,15 @@ public interface CategoryMapper {
             "FROM categories WHERE user_id = #{userId} AND name LIKE CONCAT('%', #{keyword}, '%') " +
             "ORDER BY sort_order, created_time")
     List<Category> searchByName(@Param("keyword") String keyword, @Param("userId") Long userId);
+
+    // 在 CategoryMapper.java 中添加
+    @Select("SELECT c.id, c.name, c.parent_id as parentId, c.user_id as userId, " +
+            "c.sort_order as sortOrder, c.created_time as createdTime, " +
+            "COUNT(d.id) as documentCount " +
+            "FROM categories c " +
+            "LEFT JOIN documents d ON c.id = d.category_id AND d.user_id = #{userId} " +
+            "WHERE c.user_id = #{userId} " +
+            "GROUP BY c.id " +
+            "ORDER BY c.sort_order, c.created_time")
+    List<Category> selectWithDocumentCount(Long userId);
 }

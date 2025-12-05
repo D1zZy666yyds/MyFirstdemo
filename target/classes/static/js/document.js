@@ -1,13 +1,14 @@
-
 class DocumentManager {
     constructor() {
         this.documents = [];
         this.currentCategory = null;
+        this.currentTag = null;
         this.categories = [];
-        this.tags = []; // 新增标签数据
+        this.tags = [];
         this.isInitialized = false;
-        this.editors = {}; // 存储编辑器实例
-        this.editFormSubmitHandler = null; // 用于存储事件处理器
+        this.editors = {};
+        this.editFormSubmitHandler = null;
+        this.hasTagFilterInitialized = false; // 新增：防止重复初始化
     }
 
     async initialize() {
@@ -16,7 +17,6 @@ class DocumentManager {
         console.log('初始化文档管理器...');
 
         try {
-            // 先检查认证状态
             const isAuthenticated = await authManager.checkAuthStatus();
             if (!isAuthenticated) {
                 console.warn('用户未登录，无法加载文档');
@@ -25,11 +25,22 @@ class DocumentManager {
                 return;
             }
 
-            // 先加载分类和标签，再加载文档
+            // 1. 先加载分类
             await this.loadCategories();
-            await this.loadTags(); // 新增：加载标签
+
+            // 2. 加载标签（只加载数据，不立即设置筛选器）
+            await this.loadTags();
+
+            // 3. 加载文档
             await this.loadDocuments();
+
             this.isInitialized = true;
+
+            // 4. 设置筛选器（延迟执行，确保DOM已存在）
+            setTimeout(() => {
+                this.setupCategoryFilter();
+                this.setupTagFilter();
+            }, 100);
 
         } catch (error) {
             console.error('文档管理器初始化失败:', error);
@@ -37,85 +48,126 @@ class DocumentManager {
         }
     }
 
-    // ==================== 修复方法：内容安全清理 ====================
-    cleanEditorContent(content) {
-        if (!content || typeof content !== 'string') {
-            return '';
-        }
-
-        const contentStr = content.trim();
-
-        // 1. 如果是完整的 EasyMDE 源码模式
-        if (contentStr.includes('function(e){var t=this.codemirror')) {
-            console.log('🔄 检测到 EasyMDE 污染模式，尝试处理');
-
-            // 尝试提取可能的原始内容
-            const valueMatches = [
-                /setValue\(['"`]([^'"`]*)['"`]\)/g,
-                /setValue\(([^)]+)\)/g
-            ];
-
-            for (const pattern of valueMatches) {
-                const matches = [...contentStr.matchAll(pattern)];
-                if (matches.length > 0) {
-                    for (const match of matches) {
-                        if (match[1] && match[1].length > 0 &&
-                            !match[1].includes('this.codemirror') &&
-                            !match[1].includes('function(')) {
-                            console.log('✅ 从污染内容中提取到文本');
-                            return match[1];
-                        }
-                    }
-                }
-            }
-
-            // 如果无法提取，返回空
-            return '';
-        }
-
-        // 2. 如果是明显的JS函数代码
-        if ((contentStr.includes('function(') && contentStr.includes('return')) ||
-            contentStr.includes('this.codemirror') ||
-            contentStr.includes('getValue()')) {
-            console.log('⚠️ 检测到JS代码，清空内容');
-            return '';
-        }
-
-        // 3. 正常内容直接返回
-        return contentStr;
-    }
-
-    // 新增：加载标签数据
+    // 修改：统一的标签加载方法
     async loadTags() {
         try {
             const userId = authManager.getCurrentUserId();
+            console.log('加载标签，用户ID:', userId);
+
             const response = await axios.get(`/api/tag/user/${userId}`);
+            console.log('标签API响应:', response.data);
 
             if (response.data.success) {
                 this.tags = response.data.data || [];
-                console.log('标签加载完成:', this.tags.length);
-                this.populateTagSelects();
+                console.log('标签加载完成，数量:', this.tags.length);
             } else {
                 console.error('加载标签失败:', response.data.message);
                 this.tags = [];
             }
         } catch (error) {
             console.error('加载标签失败:', error);
+            console.error('错误详情:', error.response?.data || error.message);
             this.tags = [];
         }
     }
 
-    // 新增：填充标签选择器
+    // 修改：设置标签筛选器（只执行一次）
+    setupTagFilter() {
+        // 防止重复初始化
+        if (this.hasTagFilterInitialized) {
+            console.log('标签筛选器已初始化，跳过');
+            return;
+        }
+
+        const tagFilter = document.getElementById('tag-filter');
+        if (!tagFilter) {
+            console.error('标签筛选器元素未找到: #tag-filter');
+            setTimeout(() => this.setupTagFilter(), 100); // 延迟重试
+            return;
+        }
+
+        console.log('设置标签筛选器，标签数量:', this.tags.length);
+
+        // 清空并添加默认选项
+        tagFilter.innerHTML = '<option value="">全部标签</option>';
+
+        // 添加所有标签选项
+        this.tags.forEach(tag => {
+            const option = document.createElement('option');
+            option.value = tag.id;
+            option.textContent = tag.name;
+            tagFilter.appendChild(option);
+        });
+
+        // 设置事件监听器（使用事件委托）
+        tagFilter.addEventListener('change', (e) => {
+            const tagId = e.target.value;
+            console.log('标签筛选改变:', tagId ? tagId : '全部标签');
+
+            // 重置分类筛选（互斥筛选）
+            const categoryFilter = document.getElementById('category-filter');
+            if (categoryFilter && categoryFilter.value) {
+                categoryFilter.value = "";
+                this.currentCategory = null;
+            }
+
+            this.currentTag = tagId ? parseInt(tagId) : null;
+            this.loadDocuments(null, tagId ? parseInt(tagId) : null);
+        });
+
+        this.hasTagFilterInitialized = true;
+        console.log('标签筛选器设置完成，选项数:', tagFilter.options.length);
+    }
+
+    // 修改：统一填充所有选择器（包括标签筛选器）
+    populateCategorySelects() {
+        const categorySelects = [
+            document.getElementById('doc-category'),
+            document.getElementById('edit-doc-category'),
+            document.getElementById('category-filter'),
+            document.getElementById('search-category'),
+            document.getElementById('create-doc-category')
+        ];
+
+        categorySelects.forEach(select => {
+            if (select) {
+                // 保留第一个选项
+                const firstOption = select.options[0];
+                select.innerHTML = '';
+                if (firstOption) {
+                    select.appendChild(firstOption);
+                }
+
+                // 添加所有分类选项
+                this.categories.forEach(category => {
+                    const option = document.createElement('option');
+                    option.value = category.id;
+                    option.textContent = category.name;
+                    select.appendChild(option);
+                });
+            }
+        });
+    }
+
+    // 新增：统一填充标签选择器（包括标签筛选器）
     populateTagSelects() {
         const tagSelects = [
             document.getElementById('doc-tags'),
             document.getElementById('edit-doc-tags'),
-            document.getElementById('create-doc-tags') // 新增：创建表单标签选择器
+            document.getElementById('create-doc-tags'),
+            document.getElementById('tag-filter')
         ];
 
         tagSelects.forEach(select => {
             if (select) {
-                select.innerHTML = '<option value="">选择标签...</option>';
+                // 保留第一个选项
+                const firstOption = select.options[0];
+                select.innerHTML = '';
+                if (firstOption) {
+                    select.appendChild(firstOption);
+                }
+
+                // 添加所有标签选项
                 this.tags.forEach(tag => {
                     const option = document.createElement('option');
                     option.value = tag.id;
@@ -135,7 +187,6 @@ class DocumentManager {
                 this.categories = response.data.data || [];
                 console.log('分类加载完成:', this.categories.length);
                 this.populateCategorySelects();
-                this.setupCategoryFilter(); // 修复：加载完分类后设置筛选器
             } else {
                 console.error('加载分类失败:', response.data.message);
                 this.categories = [];
@@ -146,36 +197,7 @@ class DocumentManager {
         }
     }
 
-    populateCategorySelects() {
-        const categorySelects = [
-            document.getElementById('doc-category'),
-            document.getElementById('edit-doc-category'),
-            document.getElementById('category-filter'),
-            document.getElementById('search-category'),
-            document.getElementById('create-doc-category') // 新增：创建表单分类选择器
-        ];
-
-        categorySelects.forEach(select => {
-            if (select) {
-                // 保留第一个选项（通常是"未分类"或"全部分类"）
-                const firstOption = select.options[0];
-                select.innerHTML = '';
-                if (firstOption) {
-                    select.appendChild(firstOption);
-                }
-
-                // 添加所有分类选项
-                this.categories.forEach(category => {
-                    const option = document.createElement('option');
-                    option.value = category.id;
-                    option.textContent = category.name;
-                    select.appendChild(option);
-                });
-            }
-        });
-    }
-
-    async loadDocuments(categoryId = null) {
+    async loadDocuments(categoryId = null, tagId = null) {
         try {
             if (!authManager.isAuthenticated()) {
                 console.warn('用户未登录，无法加载文档');
@@ -186,13 +208,22 @@ class DocumentManager {
             let url;
             let params = {};
 
-            if (categoryId) {
-                // ✅ 修复：使用正确的分类筛选接口
+            // 优先处理标签筛选
+            if (tagId) {
+                url = `/api/tag/document/${tagId}/documents`;
+                params.userId = userId;
+                console.log('按标签筛选，标签ID:', tagId);
+            }
+            // 然后处理分类筛选
+            else if (categoryId) {
                 url = `/api/document/category/${categoryId}`;
                 params.userId = userId;
-            } else {
-                // 获取用户所有文档
+                console.log('按分类筛选，分类ID:', categoryId);
+            }
+            // 默认获取所有文档
+            else {
                 url = `/api/document/user/${userId}`;
+                console.log('获取所有文档');
             }
 
             console.log('加载文档，URL:', url, '参数:', params);
@@ -209,7 +240,9 @@ class DocumentManager {
                 console.log('文档加载完成:', this.documents.length);
                 this.displayDocuments();
 
-                // 安全地触发文档列表加载事件
+                // 更新筛选器状态显示
+                this.updateFilterStatus(categoryId, tagId);
+
                 this.safeTriggerDocumentListLoaded();
             } else {
                 console.error('加载文档失败:', response.data.message);
@@ -221,56 +254,78 @@ class DocumentManager {
         }
     }
 
-    // 安全地触发事件（防止document未定义）
-    safeTriggerDocumentListLoaded() {
-        try {
-            if (typeof document !== 'undefined' && document.dispatchEvent) {
-                const event = new CustomEvent('documentListLoaded', {
-                    detail: { documents: this.documents }
-                });
-                document.dispatchEvent(event);
+    // 更新筛选器状态显示
+    updateFilterStatus(categoryId, tagId) {
+        const categoryFilter = document.getElementById('category-filter');
+        const tagFilter = document.getElementById('tag-filter');
+
+        if (categoryFilter) {
+            categoryFilter.value = categoryId || "";
+        }
+
+        if (tagFilter) {
+            tagFilter.value = tagId || "";
+        }
+
+        // 更新当前筛选状态
+        this.currentCategory = categoryId;
+        this.currentTag = tagId;
+
+        // 显示/隐藏清除筛选按钮
+        this.updateClearFilterButton();
+    }
+
+    // 更新清除筛选按钮
+    updateClearFilterButton() {
+        const clearBtn = document.getElementById('clear-filters');
+        if (clearBtn) {
+            if (this.currentCategory || this.currentTag) {
+                clearBtn.style.display = 'inline-block';
+            } else {
+                clearBtn.style.display = 'none';
             }
-        } catch (error) {
-            console.warn('触发文档列表事件失败:', error);
-            // 静默失败，不影响主要功能
         }
     }
 
-    // 修复 safeTriggerDocumentLoaded 方法参数名
-    safeTriggerDocumentLoaded(doc) {  // 注意：参数名改为doc
-        try {
-            if (typeof window !== 'undefined' && window.document && window.document.dispatchEvent) {
-                const event = new CustomEvent('documentLoaded', {
-                    detail: { document: doc }  // 注意：这里属性名还是document
-                });
-                window.document.dispatchEvent(event);
-            }
-        } catch (error) {
-            console.warn('触发文档加载事件失败:', error);
-            // 静默失败，不影响主要功能
-        }
-    }
+    setupCategoryFilter() {
+        const categoryFilter = document.getElementById('category-filter');
+        if (categoryFilter) {
+            // 移除旧的事件监听器（防止重复绑定）
+            const newCategoryFilter = categoryFilter.cloneNode(true);
+            categoryFilter.parentNode.replaceChild(newCategoryFilter, categoryFilter);
 
-    // 新增：加载文档标签
-    async loadDocumentTags(document) {
-        try {
-            const userId = authManager.getCurrentUserId();
-            const response = await axios.get(`/api/tag/document/${document.id}`, {
-                params: { userId: userId }
+            // 重新获取元素
+            const freshCategoryFilter = document.getElementById('category-filter');
+
+            // 确保有"全部分类"选项
+            if (freshCategoryFilter.options.length > 0 && freshCategoryFilter.options[0].value !== "") {
+                const allOption = document.createElement('option');
+                allOption.value = "";
+                allOption.textContent = "全部分类";
+                freshCategoryFilter.insertBefore(allOption, freshCategoryFilter.firstChild);
+            }
+
+            // 绑定事件
+            freshCategoryFilter.addEventListener('change', (e) => {
+                const categoryId = e.target.value;
+                console.log('分类筛选改变:', categoryId ? categoryId : '全部分类');
+
+                // 重置标签筛选
+                const tagFilter = document.getElementById('tag-filter');
+                if (tagFilter) {
+                    tagFilter.value = "";
+                    this.currentTag = null;
+                }
+
+                this.loadDocuments(categoryId || null);
             });
 
-            if (response.data.success) {
-                document.tags = response.data.data || [];
-            } else {
-                document.tags = [];
-            }
-        } catch (error) {
-            console.error(`获取文档 ${document.id} 的标签失败:`, error);
-            document.tags = [];
+            console.log('分类筛选器设置完成，选项数:', freshCategoryFilter.options.length);
+        } else {
+            console.error('分类筛选元素未找到');
         }
     }
 
-    // 修改：显示文档时不显示内容预览
     displayDocuments() {
         const container = document.getElementById('documents-list');
         if (!container) {
@@ -279,11 +334,30 @@ class DocumentManager {
         }
 
         if (!this.documents || this.documents.length === 0) {
-            container.innerHTML = '<div class="empty-state">暂无文档</div>';
+            // 显示筛选状态信息
+            let message = '暂无文档';
+            if (this.currentCategory) {
+                const category = this.categories.find(c => c.id === this.currentCategory);
+                message = `分类"${category ? category.name : '未知'}"下暂无文档`;
+            } else if (this.currentTag) {
+                const tag = this.tags.find(t => t.id === this.currentTag);
+                message = `标签"${tag ? tag.name : '未知'}"下暂无文档`;
+            }
+
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">📄</div>
+                    <p>${message}</p>
+                    ${this.currentCategory || this.currentTag ?
+                '<button onclick="documentManager.clearFilters()" class="btn-secondary" style="margin-top: 10px;">清除筛选</button>' :
+                ''
+            }
+                </div>
+            `;
             return;
         }
 
-        // 生成文档卡片HTML，添加data-document-id属性
+        // 生成文档卡片
         container.innerHTML = this.documents.map(doc => `
             <div class="doc-card" data-document-id="${doc.id}">
                 <div class="doc-title">${this.escapeHtml(doc.title || '无标题')}</div>
@@ -303,7 +377,29 @@ class DocumentManager {
         `).join('');
     }
 
-    // 新增：渲染文档标签
+    // 清除筛选
+    clearFilters() {
+        console.log('清除所有筛选');
+
+        // 重置筛选器值
+        const categoryFilter = document.getElementById('category-filter');
+        const tagFilter = document.getElementById('tag-filter');
+
+        if (categoryFilter) categoryFilter.value = "";
+        if (tagFilter) tagFilter.value = "";
+
+        // 重置状态
+        this.currentCategory = null;
+        this.currentTag = null;
+
+        // 隐藏清除按钮
+        this.updateClearFilterButton();
+
+        // 重新加载所有文档
+        this.loadDocuments();
+    }
+
+    // 渲染文档标签
     renderDocumentTags(tags) {
         if (!tags || tags.length === 0) {
             return '<span class="no-tags">无标签</span>';
@@ -322,28 +418,11 @@ class DocumentManager {
         return category ? category.name : '未分类';
     }
 
-    // 修改：编辑文档，加载标签信息
-    async editDocument(documentId) {
-        try {
-            if (!authManager.isAuthenticated()) {
-                this.showError('请先登录系统');
-                return;
-            }
-
-            const document = await this.loadDocumentWithTags(documentId);
-            this.showDocumentModal(document, 'edit');
-        } catch (error) {
-            console.error('加载文档失败:', error);
-            this.showError('加载文档失败: ' + error.message);
-        }
-    }
-
-    // 新增：加载文档及其标签
+    // 加载文档及其标签
     async loadDocumentWithTags(documentId) {
         try {
             const userId = authManager.getCurrentUserId();
 
-            // 获取文档基本信息
             const docResponse = await axios.get(`/api/document/${documentId}`, {
                 params: { userId: userId }
             });
@@ -354,7 +433,6 @@ class DocumentManager {
 
             const document = docResponse.data.data;
 
-            // 获取文档标签
             const tagResponse = await axios.get(`/api/tag/document/${documentId}`, {
                 params: { userId: userId }
             });
@@ -372,19 +450,81 @@ class DocumentManager {
         }
     }
 
-    // ==================== 修复的核心：initEditor 方法 ====================
+    async loadDocumentTags(document) {
+        try {
+            const userId = authManager.getCurrentUserId();
+            const response = await axios.get(`/api/tag/document/${document.id}`, {
+                params: { userId: userId }
+            });
+
+            if (response.data.success) {
+                document.tags = response.data.data || [];
+            } else {
+                document.tags = [];
+            }
+        } catch (error) {
+            console.error(`获取文档 ${document.id} 的标签失败:`, error);
+            document.tags = [];
+        }
+    }
+
+    // 编辑器相关方法（保持不变）
+    cleanEditorContent(content) {
+        // 保持原样...
+        if (!content || typeof content !== 'string') {
+            return '';
+        }
+
+        const contentStr = content.trim();
+
+        // 1. 如果是完整的 EasyMDE 源码模式
+        if (contentStr.includes('function(e){var t=this.codemirror')) {
+            console.log('🔄 检测到 EasyMDE 污染模式，尝试处理');
+
+            const valueMatches = [
+                /setValue\(['"`]([^'"`]*)['"`]\)/g,
+                /setValue\(([^)]+)\)/g
+            ];
+
+            for (const pattern of valueMatches) {
+                const matches = [...contentStr.matchAll(pattern)];
+                if (matches.length > 0) {
+                    for (const match of matches) {
+                        if (match[1] && match[1].length > 0 &&
+                            !match[1].includes('this.codemirror') &&
+                            !match[1].includes('function(')) {
+                            console.log('✅ 从污染内容中提取到文本');
+                            return match[1];
+                        }
+                    }
+                }
+            }
+
+            return '';
+        }
+
+        // 2. 如果是明显的JS函数代码
+        if ((contentStr.includes('function(') && contentStr.includes('return')) ||
+            contentStr.includes('this.codemirror') ||
+            contentStr.includes('getValue()')) {
+            console.log('⚠️ 检测到JS代码，清空内容');
+            return '';
+        }
+
+        // 3. 正常内容直接返回
+        return contentStr;
+    }
+
     async initEditor(elementId, content = '', mode = 'create') {
+        // 保持原样...
         console.log('🔄 初始化编辑器:', elementId, '模式:', mode);
 
-        // 🔧 1. 智能内容清理
         let safeContent = this.cleanEditorContent(content);
 
-        // 如果是污染内容被清空，给用户友好的提示
         if (!safeContent && content && content.length > 50) {
             safeContent = '⚠️ 此文档内容异常（可能由于编辑器故障）。\n请重新输入您的内容，系统已修复此问题。';
         }
 
-        // 2. 销毁现有编辑器实例
         if (this.editors[elementId]) {
             try {
                 const editor = this.editors[elementId];
@@ -400,7 +540,6 @@ class DocumentManager {
             delete this.editors[elementId];
         }
 
-        // 3. 等待DOM渲染
         await this.waitForElement(elementId);
 
         const editorElement = document.getElementById(elementId);
@@ -410,12 +549,10 @@ class DocumentManager {
         }
 
         try {
-            // 清空容器并创建textarea
             editorElement.innerHTML = '<textarea class="editor-textarea"></textarea>';
             const textarea = editorElement.querySelector('textarea');
             textarea.value = safeContent;
 
-            // 设置文本区域样式
             textarea.style.width = '100%';
             textarea.style.height = '400px';
             textarea.style.padding = '10px';
@@ -423,7 +560,6 @@ class DocumentManager {
             textarea.style.fontFamily = 'monospace';
             textarea.style.resize = 'vertical';
 
-            // 4. 检查是否应该使用EasyMDE
             const shouldUseEasyMDE = typeof EasyMDE !== 'undefined' &&
                 !this.containsJsCode(safeContent);
 
@@ -454,7 +590,6 @@ class DocumentManager {
                 }
             }
 
-            // 5. 使用简单文本区域编辑器
             console.log('使用简单文本区域编辑器');
             const simpleEditor = {
                 getContent: function() {
@@ -475,7 +610,6 @@ class DocumentManager {
         } catch (error) {
             console.error('编辑器初始化失败:', error);
 
-            // 最终的fallback
             editorElement.innerHTML = `<textarea style="width:100%;height:400px;padding:10px;border:1px solid #ddd;">${this.escapeHtml(safeContent)}</textarea>`;
 
             const fallbackTextarea = editorElement.querySelector('textarea');
@@ -491,8 +625,8 @@ class DocumentManager {
         }
     }
 
-    // 辅助方法：检查是否包含JS代码
     containsJsCode(content) {
+        // 保持原样...
         if (!content || typeof content !== 'string') return false;
 
         const jsPatterns = [
@@ -513,7 +647,6 @@ class DocumentManager {
         return false;
     }
 
-    // 新增：等待元素渲染的辅助方法
     waitForElement(elementId, maxAttempts = 10, interval = 100) {
         return new Promise((resolve, reject) => {
             let attempts = 0;
@@ -535,7 +668,6 @@ class DocumentManager {
         });
     }
 
-    // ==================== 修复：内容获取方法 ====================
     getEditorContent(editorId) {
         const editor = this.editors[editorId];
         if (!editor) return '';
@@ -544,27 +676,20 @@ class DocumentManager {
             let content = '';
 
             if (editor.isSimpleEditor) {
-                // 简单编辑器
                 content = editor.getContent();
             } else if (editor.isFallback) {
-                // 后备编辑器
                 content = editor.getContent();
             } else if (typeof editor.value === 'function') {
-                // EasyMDE 实例
                 content = editor.value();
             } else if (typeof editor.value === 'string') {
-                // 字符串值
                 content = editor.value;
             } else if (editor.codemirror) {
-                // CodeMirror 实例
                 content = editor.codemirror.getValue();
             } else {
-                // 最后尝试从DOM获取
                 const textarea = document.querySelector(`#${editorId} textarea`);
                 content = textarea ? textarea.value : '';
             }
 
-            // 最后的安全检查
             if (this.containsJsCode(content)) {
                 console.warn('⚠️ 获取的内容包含JS代码，已清空');
                 return '';
@@ -577,7 +702,7 @@ class DocumentManager {
         }
     }
 
-    // 修改：编辑文档表单
+    // 编辑文档表单
     renderDocumentEditForm(docData) {
         const categoryOptions = this.categories.map(cat => `
             <option value="${cat.id}" ${docData.categoryId === cat.id ? 'selected' : ''}>
@@ -585,7 +710,6 @@ class DocumentManager {
             </option>
         `).join('');
 
-        // 获取文档的标签ID
         const docTagIds = docData.tags ? docData.tags.map(tag => tag.id) : [];
 
         return `
@@ -628,7 +752,21 @@ class DocumentManager {
         `;
     }
 
-    // ==================== 修复：新建文档表单 ====================
+    async editDocument(documentId) {
+        try {
+            if (!authManager.isAuthenticated()) {
+                this.showError('请先登录系统');
+                return;
+            }
+
+            const document = await this.loadDocumentWithTags(documentId);
+            this.showDocumentModal(document, 'edit');
+        } catch (error) {
+            console.error('加载文档失败:', error);
+            this.showError('加载文档失败: ' + error.message);
+        }
+    }
+
     async showCreateDocumentModal() {
         if (!authManager.isAuthenticated()) {
             alert('请先登录系统');
@@ -682,23 +820,20 @@ class DocumentManager {
         if (modalContainer) {
             modalContainer.innerHTML = modalContent;
 
-            // 填充选择器选项
+            // 填充分类和标签选项
             this.populateCategorySelects();
             this.populateTagSelects();
 
             try {
-                // 初始化编辑器
                 await this.initEditor('create-doc-editor', '', 'create');
             } catch (error) {
                 console.error('编辑器初始化失败:', error);
-                // 后备方案
                 const editorElement = document.getElementById('create-doc-editor');
                 if (editorElement) {
                     editorElement.innerHTML = '<textarea style="width:100%;height:400px;padding:10px;border:1px solid #ddd;"></textarea>';
                 }
             }
 
-            // 设置表单提交事件
             const form = document.getElementById('create-document-form');
             if (form) {
                 form.addEventListener('submit', async (e) => {
@@ -711,7 +846,6 @@ class DocumentManager {
         }
     }
 
-    // ==================== 修复：创建文档 ====================
     async handleCreateDocument() {
         try {
             const title = document.getElementById('doc-title').value;
@@ -721,7 +855,6 @@ class DocumentManager {
                 .map(option => option.value)
                 .filter(id => id);
 
-            // 🔧 使用修复后的内容获取方法
             const content = this.getEditorContent('create-doc-editor');
 
             if (!title.trim()) {
@@ -744,13 +877,11 @@ class DocumentManager {
 
             console.log('创建文档请求数据:', documentData);
 
-            // 1. 先创建文档
             const response = await axios.post('/api/document', documentData);
 
             if (response.data.success) {
                 const createdDocument = response.data.data;
 
-                // 2. 如果有标签，设置文档标签
                 if (tagIds.length > 0) {
                     try {
                         await axios.post(`/api/tag/document/${createdDocument.id}/batch`, tagIds, {
@@ -759,28 +890,23 @@ class DocumentManager {
                         console.log('文档标签设置成功');
                     } catch (tagError) {
                         console.error('设置文档标签失败:', tagError);
-                        // 标签设置失败不影响文档创建
                     }
                 }
 
                 this.showSuccess('文档创建成功');
-                // 关闭模态框
                 const modal = document.querySelector('.modal');
                 if (modal) {
                     modal.remove();
                 }
-                // 清理编辑器实例
                 if (this.editors['create-doc-editor']) {
                     try {
                         if (this.editors['create-doc-editor'].destroy) {
                             this.editors['create-doc-editor'].destroy();
                         }
                     } catch (e) {
-                        // 忽略错误
                     }
                     delete this.editors['create-doc-editor'];
                 }
-                // 重新加载文档列表
                 await this.loadDocuments();
             } else {
                 this.showError('创建文档失败: ' + response.data.message);
@@ -791,7 +917,6 @@ class DocumentManager {
         }
     }
 
-    // ==================== 修复：编辑文档 ====================
     async handleEditDocument(event) {
         try {
             if (event) {
@@ -806,7 +931,6 @@ class DocumentManager {
                 .map(option => option.value)
                 .filter(id => id);
 
-            // 🔧 使用修复后的内容获取方法
             const content = this.getEditorContent('edit-doc-editor');
 
             if (!title.trim()) {
@@ -829,11 +953,9 @@ class DocumentManager {
 
             console.log('更新文档请求数据:', documentData);
 
-            // 1. 先更新文档
             const response = await axios.put(`/api/document/${documentId}`, documentData);
 
             if (response.data.success) {
-                // 2. 设置文档标签
                 try {
                     await axios.post(`/api/tag/document/${documentId}/batch`, tagIds, {
                         params: { userId: userId }
@@ -841,27 +963,22 @@ class DocumentManager {
                     console.log('文档标签更新成功');
                 } catch (tagError) {
                     console.error('更新文档标签失败:', tagError);
-                    // 标签更新失败不影响文档更新
                 }
 
                 this.showSuccess('文档更新成功');
-                // 关闭模态框
                 const modal = document.querySelector('.modal');
                 if (modal) {
                     modal.remove();
                 }
-                // 清理编辑器实例
                 if (this.editors['edit-doc-editor']) {
                     try {
                         if (this.editors['edit-doc-editor'].destroy) {
                             this.editors['edit-doc-editor'].destroy();
                         }
                     } catch (e) {
-                        // 忽略错误
                     }
                     delete this.editors['edit-doc-editor'];
                 }
-                // 重新加载文档列表
                 await this.loadDocuments();
             } else {
                 this.showError('更新文档失败: ' + response.data.message);
@@ -872,12 +989,10 @@ class DocumentManager {
         }
     }
 
-    // 在 viewDocument 方法中，确保正确触发事件
     async viewDocument(documentId) {
         try {
             const doc = await this.loadDocumentWithTags(documentId);
             this.showDocumentViewModal(doc);
-            // 安全地触发文档加载事件
             this.safeTriggerDocumentLoaded(doc);
         } catch (error) {
             console.error('查看文档失败:', error);
@@ -916,15 +1031,12 @@ class DocumentManager {
         if (modalContainer) {
             modalContainer.innerHTML = modalContent;
 
-            // 显示内容前先清理
             setTimeout(() => {
                 const previewDiv = document.getElementById('markdown-preview');
                 if (previewDiv && doc.content) {
-                    // 清理可能污染的内容
                     const cleanContent = this.cleanEditorContent(doc.content);
                     let html = cleanContent || '此文档内容异常，请编辑修复';
 
-                    // 简单的Markdown转换（如果内容正常）
                     if (cleanContent && cleanContent !== '此文档内容异常，请编辑修复') {
                         html = cleanContent
                             .replace(/^### (.*$)/gm, '<h3>$1</h3>')
@@ -944,7 +1056,6 @@ class DocumentManager {
         }
     }
 
-    // 新增：为查看页面渲染标签
     renderDocumentTagsForView(tags) {
         if (!tags || tags.length === 0) {
             return '无标签';
@@ -952,7 +1063,6 @@ class DocumentManager {
         return tags.map(tag => this.escapeHtml(tag.name)).join(', ');
     }
 
-    // 删除文档方法（移动到回收站）
     async deleteDocument(docId) {
         if (!confirm('确定要删除这个文档吗？文档将移动到回收站，您可以随时恢复。')) return;
 
@@ -970,7 +1080,6 @@ class DocumentManager {
             if (response.data.success) {
                 this.showSuccess('文档已移动到回收站');
 
-                // 安全地触发文档删除事件
                 try {
                     if (typeof window !== 'undefined' && window.document && window.document.dispatchEvent) {
                         const event = new CustomEvent('documentDeleted', { detail: { docId } });
@@ -980,7 +1089,6 @@ class DocumentManager {
                     console.warn('触发文档删除事件失败:', error);
                 }
 
-                // 重新加载文档列表
                 await this.loadDocuments();
                 return true;
             } else {
@@ -994,7 +1102,6 @@ class DocumentManager {
         }
     }
 
-    // 保留原始的永久删除方法（如果需要）
     async permanentDeleteDocument(documentId) {
         if (!confirm('确定要永久删除这个文档吗？此操作不可撤销。')) {
             return;
@@ -1038,17 +1145,14 @@ class DocumentManager {
             modalContainer.innerHTML = modalContent;
 
             if (mode === 'edit') {
-                // 填充选择器选项
                 this.populateCategorySelects();
                 this.populateTagSelects();
 
-                // 初始化编辑器（异步确保DOM已渲染）
                 setTimeout(async () => {
                     try {
                         await this.initEditor('edit-doc-editor', docData.content || '', 'edit');
                     } catch (error) {
                         console.error('编辑器初始化失败:', error);
-                        // 使用普通textarea作为后备
                         const editorElement = document.getElementById('edit-doc-editor');
                         if (editorElement) {
                             editorElement.innerHTML = `<textarea style="width:100%;height:400px;padding:10px;border:1px solid #ddd;">${this.escapeHtml(docData.content || '')}</textarea>`;
@@ -1056,15 +1160,12 @@ class DocumentManager {
                     }
                 }, 100);
 
-                // 设置表单提交事件
                 const form = document.getElementById('edit-document-form');
                 if (form) {
-                    // 移除旧的监听器（如果存在）
                     if (this.editFormSubmitHandler) {
                         form.removeEventListener('submit', this.editFormSubmitHandler);
                     }
 
-                    // 创建新的监听器
                     this.editFormSubmitHandler = (e) => {
                         e.preventDefault();
                         this.handleEditDocument(e);
@@ -1121,33 +1222,32 @@ class DocumentManager {
         `;
     }
 
-    setupCategoryFilter() {
-        const categoryFilter = document.getElementById('category-filter');
-        if (categoryFilter) {
-            // 移除旧的事件监听器（防止重复绑定）
-            categoryFilter.replaceWith(categoryFilter.cloneNode(true));
-            const freshCategoryFilter = document.getElementById('category-filter');
-
-            // 确保第一个选项是"全部分类"
-            if (freshCategoryFilter.options.length > 0 && freshCategoryFilter.options[0].value !== "") {
-                const allOption = document.createElement('option');
-                allOption.value = "";
-                allOption.textContent = "全部分类";
-                freshCategoryFilter.insertBefore(allOption, freshCategoryFilter.firstChild);
+    safeTriggerDocumentListLoaded() {
+        try {
+            if (typeof document !== 'undefined' && document.dispatchEvent) {
+                const event = new CustomEvent('documentListLoaded', {
+                    detail: { documents: this.documents }
+                });
+                document.dispatchEvent(event);
             }
-
-            // 重新绑定事件
-            freshCategoryFilter.addEventListener('change', (e) => {
-                const categoryId = e.target.value;
-                console.log('分类筛选改变:', categoryId ? categoryId : '全部分类');
-                this.loadDocuments(categoryId || null);
-            });
-
-            console.log('分类筛选器设置完成，选项数:', freshCategoryFilter.options.length);
-        } else {
-            console.error('分类筛选元素未找到');
+        } catch (error) {
+            console.warn('触发文档列表事件失败:', error);
         }
     }
+
+    safeTriggerDocumentLoaded(doc) {
+        try {
+            if (typeof window !== 'undefined' && window.document && window.document.dispatchEvent) {
+                const event = new CustomEvent('documentLoaded', {
+                    detail: { document: doc }
+                });
+                window.document.dispatchEvent(event);
+            }
+        } catch (error) {
+            console.warn('触发文档加载事件失败:', error);
+        }
+    }
+
     escapeHtml(text) {
         if (!text) return '';
         const div = document.createElement('div');
@@ -1179,17 +1279,23 @@ function showCreateDocumentModal() {
     }
 }
 
-// 在初始化时设置分类筛选
+// 清除筛选的全局函数
+function clearFilters() {
+    if (documentManager) {
+        documentManager.clearFilters();
+    }
+}
+
+// 简化初始化：只在DOM加载完成后执行一次
 document.addEventListener('DOMContentLoaded', function() {
     setTimeout(() => {
-        if (documentManager) {
-            documentManager.initialize().then(() => {
-                // 初始化完成后设置分类筛选
-                documentManager.setupCategoryFilter();
-            });
+        if (documentManager && !documentManager.isInitialized) {
+            documentManager.initialize();
         }
-    }, 100);
+    }, 500);
 });
 
 // 确保全局可访问
 window.documentManager = documentManager;
+window.clearFilters = clearFilters;
+window.showCreateDocumentModal = showCreateDocumentModal;

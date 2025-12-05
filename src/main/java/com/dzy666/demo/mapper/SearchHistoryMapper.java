@@ -23,10 +23,15 @@ public interface SearchHistoryMapper {
     @Delete("DELETE FROM search_history WHERE user_id = #{userId}")
     int deleteByUserId(@Param("userId") Long userId);
 
-    // 🎯 新增：更新搜索结果数量 - 修复版
+    // 🎯 修复：更新搜索结果数量 - 使用子查询
     @Update("UPDATE search_history SET result_count = #{resultCount}, search_time = NOW() " +
-            "WHERE user_id = #{userId} AND keyword = #{keyword} " +
-            "ORDER BY search_time DESC LIMIT 1")
+            "WHERE id = (" +
+            "    SELECT id FROM (" +
+            "        SELECT id FROM search_history " +
+            "        WHERE user_id = #{userId} AND keyword = #{keyword} " +
+            "        ORDER BY search_time DESC LIMIT 1" +
+            "    ) AS temp" +
+            ")")
     int updateResultCount(@Param("userId") Long userId,
                           @Param("keyword") String keyword,
                           @Param("resultCount") int resultCount);
@@ -52,11 +57,28 @@ public interface SearchHistoryMapper {
             "GROUP BY keyword ORDER BY search_count DESC LIMIT 10")
     List<Map<String, Object>> getPopularKeywords(@Param("userId") Long userId);
 
-    // 🎯 新增：获取最近搜索词（用于搜索建议）
+    // 🎯 修复：获取最近搜索词（优化模糊查询）
     @Select("SELECT DISTINCT keyword FROM search_history " +
-            "WHERE user_id = #{userId} AND keyword LIKE CONCAT('%', #{prefix}, '%') " +
+            "WHERE user_id = #{userId} " +
+            "AND keyword LIKE CONCAT(#{prefix}, '%') " +
             "ORDER BY search_time DESC LIMIT #{limit}")
     List<String> findKeywordsByPrefix(@Param("userId") Long userId,
                                       @Param("prefix") String prefix,
                                       @Param("limit") int limit);
+
+    // 🎯 新增：批量获取文档标签
+    @Select({
+            "<script>",
+            "SELECT dt.document_id, t.id as tag_id, t.name as tag_name ",
+            "FROM document_tag dt ",
+            "JOIN tag t ON dt.tag_id = t.id ",
+            "WHERE dt.document_id IN ",
+            "<foreach collection='documentIds' item='id' open='(' separator=',' close=')'>",
+            "   #{id}",
+            "</foreach>",
+            "AND t.user_id = #{userId}",
+            "</script>"
+    })
+    List<Map<String, Object>> getDocumentsTagsBatch(@Param("documentIds") List<Long> documentIds,
+                                                    @Param("userId") Long userId);
 }

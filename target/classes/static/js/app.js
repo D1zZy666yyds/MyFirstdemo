@@ -1,9 +1,10 @@
-// 修复后的完整 app.js
+// 修复后的完整 app.js - 支持分类和标签筛选的搜索版
 class KnowledgeBaseApp {
     constructor() {
         this.currentPage = 'dashboard';
         this.categories = [];
-        this.categoryCache = new Map(); // 缓存分类ID到名称的映射
+        this.categoryCache = new Map();
+        this.tagsCache = new Map();
         this.searchHistory = JSON.parse(localStorage.getItem('searchHistory') || '[]');
         this.init();
     }
@@ -12,7 +13,6 @@ class KnowledgeBaseApp {
         console.log('知识库应用初始化...');
 
         try {
-            // 先检查认证状态
             const isAuthenticated = await authManager.checkAuthStatus();
 
             if (!isAuthenticated) {
@@ -33,12 +33,9 @@ class KnowledgeBaseApp {
     }
 
     setupNavigation() {
-        // 监听hash变化来切换页面
         window.addEventListener('hashchange', () => {
             this.handleRouteChange();
         });
-
-        // 初始路由处理
         this.handleRouteChange();
     }
 
@@ -50,17 +47,14 @@ class KnowledgeBaseApp {
     showPage(pageName) {
         console.log('切换页面:', pageName);
 
-        // 隐藏所有页面
         document.querySelectorAll('.page').forEach(page => {
             page.classList.remove('active');
         });
 
-        // 更新导航激活状态
         document.querySelectorAll('.nav-item').forEach(item => {
             item.classList.remove('active');
         });
 
-        // 显示目标页面
         const targetPage = document.getElementById(`${pageName}-page`);
         const targetNav = document.querySelector(`[href="#${pageName}"]`);
 
@@ -72,12 +66,9 @@ class KnowledgeBaseApp {
         }
 
         this.currentPage = pageName;
-
-        // 加载页面特定数据
         this.loadPageData(pageName);
     }
 
-    // 清理模态框的方法
     clearModals() {
         const modalContainer = document.getElementById('modal-container');
         if (modalContainer) {
@@ -89,10 +80,8 @@ class KnowledgeBaseApp {
         console.log('加载页面数据:', pageName);
 
         try {
-            // 在切换页面时，清理之前的模态框
             this.clearModals();
 
-            // 根据页面名称加载数据
             switch (pageName) {
                 case 'dashboard':
                     if (window.dashboardManager) {
@@ -130,18 +119,15 @@ class KnowledgeBaseApp {
 
     async loadDocumentsPage() {
         try {
-            // 检查URL参数是否有分类ID
             const urlParams = new URLSearchParams(window.location.search);
             const categoryId = urlParams.get('categoryId');
 
-            // 确保文档管理器已初始化
             if (window.documentManager) {
                 if (!window.documentManager.isInitialized) {
                     console.log('文档管理器未初始化，正在初始化...');
                     await window.documentManager.initialize();
                 }
 
-                // 如果有分类ID，加载该分类的文档
                 if (categoryId) {
                     await window.documentManager.loadDocuments(categoryId);
                 } else {
@@ -149,11 +135,8 @@ class KnowledgeBaseApp {
                 }
             } else {
                 console.error('文档管理器未加载');
-
-                // 尝试重新获取文档管理器
                 setTimeout(() => {
                     if (window.documentManager) {
-                        // 延迟重新执行
                         this.loadDocumentsPage();
                     } else {
                         this.showError('文档管理器未加载，请刷新页面');
@@ -168,8 +151,8 @@ class KnowledgeBaseApp {
 
     async loadInitialData() {
         console.log('加载初始数据...');
-        // 加载分类和标签等共享数据
         await this.loadCategoriesForFilter();
+        await this.loadTagsForCache();
     }
 
     async loadCategoriesForFilter() {
@@ -183,7 +166,6 @@ class KnowledgeBaseApp {
             if (response.data.success) {
                 this.categories = response.data.data || [];
 
-                // 建立分类缓存
                 this.categoryCache.clear();
                 this.categories.forEach(category => {
                     if (category.id && category.name) {
@@ -199,27 +181,43 @@ class KnowledgeBaseApp {
             }
         } catch (error) {
             console.error('加载分类失败:', error);
-            // 不显示错误，因为分类过滤器不是关键功能
         }
     }
 
-    // 获取分类显示名称（简化版）
+    async loadTagsForCache() {
+        try {
+            const userId = authManager.getCurrentUserId();
+            console.log('加载标签缓存，用户ID:', userId);
+
+            const response = await axios.get(`/api/tag/user/${userId}`);
+            if (response.data.success) {
+                const tags = response.data.data || [];
+                this.tagsCache.clear();
+                tags.forEach(tag => {
+                    if (tag.id && tag.name) {
+                        this.tagsCache.set(tag.id, tag.name);
+                    }
+                });
+                console.log('标签缓存建立完成:', this.tagsCache.size, '条记录');
+            }
+        } catch (error) {
+            console.error('加载标签缓存失败:', error);
+        }
+    }
+
     getCategoryDisplay(categoryInfo) {
         if (!categoryInfo && categoryInfo !== 0) return '未分类';
 
-        // 情况1：已经是字符串名称
         if (typeof categoryInfo === 'string') {
             return categoryInfo;
         }
 
-        // 情况2：是数字ID
         if (typeof categoryInfo === 'number' || /^\d+$/.test(String(categoryInfo))) {
             const categoryId = Number(categoryInfo);
             const cachedName = this.categoryCache.get(categoryId);
             return cachedName || `分类${categoryId}`;
         }
 
-        // 情况3：是对象
         if (typeof categoryInfo === 'object') {
             if (categoryInfo.name) {
                 return categoryInfo.name;
@@ -231,6 +229,32 @@ class KnowledgeBaseApp {
         }
 
         return '未分类';
+    }
+
+    getTagDisplay(tagInfo) {
+        if (!tagInfo) return '无标签';
+
+        if (typeof tagInfo === 'string') {
+            return tagInfo;
+        }
+
+        if (typeof tagInfo === 'number' || /^\d+$/.test(String(tagInfo))) {
+            const tagId = Number(tagInfo);
+            const cachedName = this.tagsCache.get(tagId);
+            return cachedName || `标签${tagId}`;
+        }
+
+        if (typeof tagInfo === 'object') {
+            if (tagInfo.name) {
+                return tagInfo.name;
+            }
+            if (tagInfo.id) {
+                const cachedName = this.tagsCache.get(tagInfo.id);
+                return cachedName || `标签${tagInfo.id}`;
+            }
+        }
+
+        return '无标签';
     }
 
     updateCategoryFilters() {
@@ -251,43 +275,25 @@ class KnowledgeBaseApp {
     }
 
     setupEventListeners() {
-        // 全局搜索 - 增强功能
+        // 全局搜索 - 只保留Enter键搜索
         const globalSearch = document.getElementById('global-search');
         if (globalSearch) {
-            // 实时搜索建议
-            globalSearch.addEventListener('input', this.debounce((e) => {
-                const keyword = e.target.value.trim();
-                if (keyword.length > 0) {
-                    this.showSearchSuggestions(keyword);
-                } else {
-                    this.hideSearchSuggestions();
-                }
-            }, 300));
-
             globalSearch.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
                     this.performSearch();
                 }
             });
-
-            // 点击其他地方隐藏建议
-            document.addEventListener('click', (e) => {
-                if (!e.target.closest('.search-header')) {
-                    this.hideSearchSuggestions();
-                }
-            });
         }
 
-        // 标签筛选
+        // 标签筛选支持多选
         const searchTag = document.getElementById('search-tag');
         if (searchTag) {
             searchTag.addEventListener('change', () => {
-                console.log('标签筛选变化:', searchTag.value);
+                console.log('标签筛选变化:', this.getSelectedTagIds());
                 this.performSearch();
             });
         }
 
-        // 分类筛选
         const searchCategory = document.getElementById('search-category');
         if (searchCategory) {
             searchCategory.addEventListener('change', () => {
@@ -295,9 +301,72 @@ class KnowledgeBaseApp {
                 this.performSearch();
             });
         }
+
+        const searchSort = document.getElementById('search-sort');
+        if (searchSort) {
+            searchSort.addEventListener('change', () => {
+                console.log('排序方式变化:', searchSort.value);
+                this.performSearch();
+            });
+        }
     }
 
-    // 防抖函数
+    getSelectedTagIds() {
+        const searchTag = document.getElementById('search-tag');
+        if (!searchTag) return [];
+
+        if (searchTag.multiple) {
+            return Array.from(searchTag.selectedOptions)
+                .map(option => option.value)
+                .filter(value => value !== '')
+                .map(id => parseInt(id));
+        } else {
+            return searchTag.value ? [parseInt(searchTag.value)] : [];
+        }
+    }
+
+    toggleAdvancedFilters() {
+        console.log('切换高级筛选器');
+
+        const filterContent = document.getElementById('filter-content');
+        const toggleIcon = document.querySelector('.filter-header .toggle-icon');
+
+        if (!filterContent || !toggleIcon) {
+            console.error('筛选元素未找到');
+            return;
+        }
+
+        const isHidden = filterContent.style.display === 'none' ||
+            filterContent.style.display === '';
+
+        filterContent.style.display = isHidden ? 'block' : 'none';
+        toggleIcon.textContent = isHidden ? '▲' : '▼';
+
+        if (isHidden) {
+            this.loadFiltersIfNeeded();
+        }
+    }
+
+    async loadFiltersIfNeeded() {
+        console.log('加载筛选器数据');
+
+        try {
+            const categorySelect = document.getElementById('search-category');
+            if (categorySelect && categorySelect.options.length <= 1) {
+                console.log('加载分类选项...');
+                await this.loadCategoriesForFilter();
+            }
+
+            const tagSelect = document.getElementById('search-tag');
+            if (tagSelect && tagSelect.options.length <= 1) {
+                console.log('加载标签选项...');
+                await this.loadTagsForSearch();
+            }
+        } catch (error) {
+            console.error('加载筛选器数据失败:', error);
+        }
+    }
+
     debounce(func, wait) {
         let timeout;
         return function executedFunction(...args) {
@@ -310,100 +379,20 @@ class KnowledgeBaseApp {
         };
     }
 
-    // 显示搜索建议
-    async showSearchSuggestions(keyword) {
-        if (!keyword || keyword.length < 2) {
-            this.hideSearchSuggestions();
-            return;
-        }
-
-        try {
-            const userId = authManager.getCurrentUserId();
-            const response = await axios.get('/api/search/suggestions', {
-                params: {
-                    keyword,
-                    userId: userId,
-                    limit: 5
-                }
-            });
-
-            if (response.data.success) {
-                this.displaySearchSuggestions(response.data.data, keyword);
-            }
-        } catch (error) {
-            console.error('获取搜索建议失败:', error);
-            this.hideSearchSuggestions();
-        }
-    }
-
-    // 显示搜索建议
-    displaySearchSuggestions(suggestions, keyword) {
-        let suggestionsContainer = document.getElementById('search-suggestions');
-        if (!suggestionsContainer) {
-            suggestionsContainer = document.createElement('div');
-            suggestionsContainer.id = 'search-suggestions';
-            suggestionsContainer.className = 'search-suggestions';
-            document.querySelector('.search-header').appendChild(suggestionsContainer);
-        }
-
-        if (!suggestions || suggestions.length === 0) {
-            suggestionsContainer.innerHTML = `
-                <div class="suggestion-item no-suggestions">
-                    <span>无相关建议</span>
-                </div>
-            `;
-            suggestionsContainer.style.display = 'block';
-            return;
-        }
-
-        suggestionsContainer.innerHTML = suggestions.map(suggestion => `
-            <div class="suggestion-item" onclick="app.selectSuggestion('${this.escapeHtml(suggestion)}')">
-                <span class="suggestion-text">${this.highlightText(suggestion, keyword)}</span>
-                <span class="suggestion-type">建议</span>
-            </div>
-        `).join('');
-
-        // 添加搜索历史
-        const historyItems = this.searchHistory
-            .filter(item => item.toLowerCase().includes(keyword.toLowerCase()))
-            .slice(0, 3)
-            .map(item => `
-                <div class="suggestion-item" onclick="app.selectSuggestion('${this.escapeHtml(item)}')">
-                    <span class="suggestion-text">${this.highlightText(item, keyword)}</span>
-                    <span class="suggestion-type history">历史</span>
-                </div>
-            `).join('');
-
-        if (historyItems) {
-            suggestionsContainer.innerHTML += historyItems;
-        }
-
-        suggestionsContainer.style.display = 'block';
-    }
-
-    // 隐藏搜索建议
-    hideSearchSuggestions() {
-        const suggestionsContainer = document.getElementById('search-suggestions');
-        if (suggestionsContainer) {
-            suggestionsContainer.style.display = 'none';
-        }
-    }
-
-    // 选择搜索建议
-    selectSuggestion(suggestion) {
-        const globalSearch = document.getElementById('global-search');
-        if (globalSearch) {
-            globalSearch.value = suggestion;
-            this.hideSearchSuggestions();
-            this.performSearch();
-        }
-    }
-
-    // 核心修复：执行搜索
+    // 🎯 核心搜索方法 - 修复：正确传递多标签参数
     async performSearch() {
+        console.log('=== 🔍 开始执行搜索 ===');
+
         const globalSearch = document.getElementById('global-search');
         const searchCategory = document.getElementById('search-category');
         const searchTag = document.getElementById('search-tag');
+        const searchSort = document.getElementById('search-sort');
+
+        console.log('📋 页面筛选器状态:');
+        console.log('  - 关键词:', globalSearch ? globalSearch.value : '未找到');
+        console.log('  - 分类ID:', searchCategory ? `${searchCategory.value} (${searchCategory.options[searchCategory.selectedIndex]?.text})` : '未找到');
+        console.log('  - 标签ID:', searchTag ? this.getSelectedTagIds() : '未找到');
+        console.log('  - 排序方式:', searchSort ? searchSort.value : '未找到');
 
         if (!globalSearch) {
             console.error('搜索输入框未找到');
@@ -417,135 +406,222 @@ class KnowledgeBaseApp {
             return;
         }
 
-        // 保存搜索历史
         this.saveToSearchHistory(keyword);
 
         try {
             const userId = authManager.getCurrentUserId();
+            console.log('👤 用户ID:', userId);
+
             this.showSearchLoading(true);
+            this.showSearchStatusBar(keyword, searchCategory, searchTag);
 
-            console.log('🔍 开始搜索:', keyword);
+            console.log('🔍 搜索关键词:', keyword);
 
-            let response;
-
-            // 根据筛选条件选择API
             const categoryId = searchCategory && searchCategory.value ? parseInt(searchCategory.value) : null;
-            const tagId = searchTag && searchTag.value ? parseInt(searchTag.value) : null;
+            const tagIds = this.getSelectedTagIds();
+            const sortBy = searchSort ? searchSort.value : 'relevance';
 
-            if (categoryId && tagId) {
-                // 高级搜索
-                const searchCriteria = {
-                    keyword: keyword,
-                    categoryId: categoryId,
-                    tagIds: [tagId],
-                    limit: 50
-                };
-                response = await axios.post('/api/search/advanced', searchCriteria, {
-                    params: { userId: userId }
-                });
-            } else if (categoryId) {
-                // 分类搜索
-                response = await axios.get('/api/search/category', {
-                    params: {
-                        keyword: keyword,
-                        categoryId: categoryId,
-                        userId: userId,
-                        limit: 50
-                    }
-                });
-            } else if (tagId) {
-                // 标签搜索
-                response = await axios.get('/api/search/tag', {
-                    params: {
-                        keyword: keyword,
-                        tagId: tagId,
-                        userId: userId,
-                        limit: 50
-                    }
-                });
-            } else {
-                // 基础搜索
-                response = await axios.get('/api/search', {
-                    params: {
-                        keyword: keyword,
-                        userId: userId,
-                        limit: 50
-                    }
+            console.log('🎯 智能搜索参数:');
+            console.log('  - 关键词:', keyword);
+            console.log('  - 分类ID:', categoryId);
+            console.log('  - 标签IDs:', tagIds);
+            console.log('  - 用户ID:', userId);
+            console.log('  - 排序方式:', sortBy);
+            console.log('  - 限制数:', 50);
+
+            console.log('📡 发送API请求到: /api/search/smart');
+
+            // 🎯 修复关键：正确构建GET请求的数组参数
+            const params = new URLSearchParams();
+            params.append('keyword', keyword);
+            if (categoryId) params.append('categoryId', categoryId);
+            if (tagIds && tagIds.length > 0) {
+                // 🎯 重要：对于GET请求中的List参数，需要多次append同一个参数名
+                tagIds.forEach(tagId => {
+                    params.append('tagIds', tagId);
                 });
             }
+            params.append('userId', userId);
+            params.append('limit', 50);
+            params.append('sortBy', sortBy);
 
-            console.log('搜索响应:', response.data);
+            console.log('📤 请求参数（URL编码）:', params.toString());
+
+            const response = await axios.get('/api/search/smart', {
+                params: params,
+                // 🎯 设置正确的参数序列化器
+                paramsSerializer: function(params) {
+                    return params.toString();
+                }
+            });
+
+            console.log('📥 收到响应:');
+            console.log('  - 状态码:', response.status);
+            console.log('  - 成功状态:', response.data.success);
+            console.log('  - 消息:', response.data.message);
+            console.log('  - 结果数量:', response.data.data?.length || 0);
 
             if (response.data.success) {
-                const documents = response.data.data || [];
-                console.log(`接收到 ${documents.length} 个文档`);
+                const results = response.data.data || [];
+                console.log(`✅ 搜索成功，返回 ${results.length} 个结果`);
 
-                // 显示搜索结果
-                this.displaySearchResults(documents, keyword);
+                this.displaySearchResults(results, keyword);
 
-                // 更新搜索历史显示
                 this.displaySearchHistory();
+
+                this.showExportButton(results.length > 0);
             } else {
+                console.warn('⚠️ 搜索返回失败状态:', response.data.message);
                 throw new Error(response.data.message || '搜索失败');
             }
         } catch (error) {
-            console.error('搜索失败:', error);
-            this.showError('搜索失败: ' + error.message);
+            console.error('❌ 搜索请求失败:');
+            console.error('  - 错误信息:', error.message);
+            if (error.response) {
+                console.error('  - 状态码:', error.response.status);
+                console.error('  - 响应数据:', error.response.data);
+            }
+
+            this.showError('搜索失败: ' + (error.response?.data?.message || error.message));
             this.displaySearchResults([], keyword);
+        } finally {
+            this.showSearchLoading(false);
+            console.log('=== 🔍 搜索结束 ===');
+        }
+    }
+
+    // 🎯 备选方案：使用POST请求（如果需要）
+    async performSearchPost() {
+        const globalSearch = document.getElementById('global-search');
+        const keyword = globalSearch.value.trim();
+
+        if (!keyword) {
+            this.showError('请输入搜索关键词');
+            return;
+        }
+
+        const categoryId = document.getElementById('search-category')?.value || null;
+        const tagIds = this.getSelectedTagIds();
+        const sortBy = document.getElementById('search-sort')?.value || 'relevance';
+        const userId = authManager.getCurrentUserId();
+
+        try {
+            this.showSearchLoading(true);
+
+            // 使用POST请求，可以更自然地传递数组
+            const response = await axios.post('/api/search/advanced', {
+                keyword: keyword,
+                categoryId: categoryId,
+                tagIds: tagIds.length > 0 ? tagIds : null,
+                sortBy: sortBy,
+                limit: 50
+            }, {
+                params: { userId: userId }
+            });
+
+            if (response.data.success) {
+                const results = response.data.data || [];
+                this.displaySearchResults(results, keyword);
+            } else {
+                throw new Error(response.data.message);
+            }
+        } catch (error) {
+            console.error('POST搜索失败:', error);
+            this.showError('搜索失败: ' + error.message);
         } finally {
             this.showSearchLoading(false);
         }
     }
 
-    // 渲染搜索结果项（兼容多种字段名）
-    renderSearchResultItem(doc, keyword) {
-        // 验证文档数据
-        if (!doc || !doc.id) {
-            console.warn('无效的文档数据:', doc);
+    showSearchStatusBar(keyword, searchCategory, searchTag) {
+        const searchStatus = document.getElementById('search-status');
+        const searchKeyword = document.getElementById('search-keyword');
+        const filterConditions = document.getElementById('filter-conditions');
+
+        if (searchStatus) {
+            searchStatus.style.display = 'block';
+        }
+
+        if (searchKeyword) {
+            searchKeyword.textContent = keyword;
+        }
+
+        if (filterConditions) {
+            const conditions = [];
+
+            if (searchCategory && searchCategory.value) {
+                const categoryName = searchCategory.options[searchCategory.selectedIndex].text;
+                conditions.push(`分类: ${categoryName}`);
+            }
+
+            const selectedTagIds = this.getSelectedTagIds();
+            if (selectedTagIds.length > 0) {
+                const tagNames = selectedTagIds.map(tagId => {
+                    const tagName = this.tagsCache.get(tagId) || `标签${tagId}`;
+                    return tagName;
+                }).join(', ');
+                conditions.push(`标签: ${tagNames}`);
+            }
+
+            filterConditions.textContent = conditions.length > 0 ? conditions.join(' | ') : '无';
+        }
+    }
+
+    showExportButton(show) {
+        const exportBtn = document.getElementById('export-btn');
+        if (exportBtn) {
+            exportBtn.style.display = show ? 'inline-block' : 'none';
+        }
+    }
+
+    renderSearchResultItem(result, keyword) {
+        if (!result || !result.id) {
+            console.warn('无效的搜索结果数据:', result);
             return '';
         }
 
-        // 🎯 兼容性处理：支持多种字段名
-        const docId = doc.id || doc.docId;
-        const title = doc.title || doc.name || '无标题';
-        const content = doc.content || '无内容';
-        const categoryId = doc.categoryId || doc.category;
-        const tags = doc.tags || doc.tagList || [];
-        const updateTime = doc.updateTime || doc.updatedTime || doc.createdTime;
+        const docId = result.id;
+        const title = result.title || '无标题';
+        const contentPreview = result.contentPreview || '无内容预览';
+        const categoryId = result.categoryId;
+        const categoryName = result.categoryName || '未分类';
+        const tags = result.tags || [];
+        const updateTime = result.updatedTime || result.createdTime;
+        const relevanceScore = result.relevanceScore || 0;
 
-        // 获取文档标题（带高亮）
         const highlightedTitle = this.highlightText(title, keyword);
+        const highlightedPreview = this.highlightText(contentPreview, keyword);
 
-        // 获取内容预览（简单截取）
-        const contentPreview = content ?
-            this.highlightText(this.getSimplePreview(content, 150), keyword) :
-            '无内容';
+        const tagsDisplay = tags.length > 0
+            ? tags.map(tag => `<span class="tag-badge">${tag.name}</span>`).join('')
+            : '<span class="no-tag">无标签</span>';
 
-        // 🎯 修复：使用新的分类显示方法
-        const categoryDisplay = this.getCategoryDisplay(categoryId);
+        const formattedTime = updateTime
+            ? new Date(updateTime).toLocaleString('zh-CN')
+            : '未知';
 
-        // 🎯 修复：标签显示（兼容数组和对象列表）
-        let tagsDisplay = this.formatTags(tags);
-
-        // 格式化时间
-        const formattedTime = updateTime ?
-            new Date(updateTime).toLocaleString('zh-CN') : '未知';
+        const relevanceDisplay = relevanceScore > 0
+            ? `<span class="relevance-score" title="相关性评分">${(relevanceScore * 100).toFixed(1)}%</span>`
+            : '';
 
         return `
         <div class="search-result-item" data-doc-id="${docId}">
             <div class="result-header">
-                <h4 class="result-title">${highlightedTitle}</h4>
+                <h4 class="result-title">
+                    ${highlightedTitle}
+                    ${relevanceDisplay}
+                </h4>
                 <div class="result-actions">
                     <button onclick="app.viewSearchDocument(${docId})" class="btn-small" title="查看">👁️</button>
                     <button onclick="app.editSearchDocument(${docId})" class="btn-small" title="编辑">✏️</button>
                 </div>
             </div>
             <div class="result-content">
-                <p class="doc-preview">${contentPreview}</p>
+                <p class="doc-preview">${highlightedPreview}</p>
             </div>
             <div class="result-meta">
                 <span class="meta-item">
-                    <strong>分类:</strong> ${categoryDisplay}
+                    <strong>分类:</strong> ${this.escapeHtml(categoryName)}
                 </span>
                 <span class="meta-item">
                     <strong>标签:</strong> ${tagsDisplay}
@@ -558,10 +634,8 @@ class KnowledgeBaseApp {
     `;
     }
 
-
-    // 显示搜索加载状态
     showSearchLoading(loading) {
-        const searchButton = document.querySelector('.search-header .btn-primary');
+        const searchButton = document.querySelector('.search-hero .btn-primary');
         const resultsContainer = document.getElementById('search-results');
 
         if (loading) {
@@ -579,43 +653,35 @@ class KnowledgeBaseApp {
         }
     }
 
-    // 🎯 核心修复：显示搜索结果（不再过滤）
-    displaySearchResults(documents, keyword) {
+    displaySearchResults(results, keyword) {
         const resultsContainer = document.getElementById('search-results');
         if (!resultsContainer) {
             console.error('搜索结果容器未找到');
             return;
         }
 
-        // 验证数据
-        if (!Array.isArray(documents)) {
-            console.error('返回数据不是数组:', documents);
-            documents = [];
+        if (!Array.isArray(results)) {
+            console.error('返回数据不是数组:', results);
+            results = [];
         }
 
-        if (documents.length === 0) {
+        const resultsCount = document.getElementById('search-results-count');
+        if (resultsCount) {
+            resultsCount.textContent = `${results.length} 个结果`;
+        }
+
+        if (results.length === 0) {
             resultsContainer.innerHTML = this.renderNoResults(keyword);
             return;
         }
 
-        // 🎯 直接显示所有返回的文档，信任后端的搜索结果
         resultsContainer.innerHTML = `
-            <div class="search-results-header">
-                <div class="results-stats">
-                    <span>找到 ${documents.length} 个文档</span>
-                    <span class="search-keyword">关键词: "${keyword}"</span>
-                </div>
-                <div class="results-actions">
-                    <button onclick="app.clearSearchFilters()" class="btn-secondary btn-small">清除筛选</button>
-                </div>
-            </div>
             <div class="search-results-list">
-                ${documents.map(doc => this.renderSearchResultItem(doc, keyword)).join('')}
+                ${results.map(result => this.renderSearchResultItem(result, keyword)).join('')}
             </div>
         `;
     }
 
-    // 无结果时的显示
     renderNoResults(keyword) {
         return `
             <div class="no-results">
@@ -629,62 +695,13 @@ class KnowledgeBaseApp {
                         <li>尝试不同的搜索词组合</li>
                         <li>检查筛选条件</li>
                         <li>使用文档标题中的关键词</li>
+                        <li>尝试调整排序方式</li>
                     </ul>
                 </div>
             </div>
         `;
     }
 
-    // 格式化标签显示
-    formatTags(tags) {
-        if (!tags) return '无标签';
-
-        // 尝试解析标签数据
-        try {
-            if (typeof tags === 'string') {
-                // 尝试解析JSON字符串
-                const parsed = JSON.parse(tags);
-                if (Array.isArray(parsed)) {
-                    tags = parsed;
-                }
-            }
-
-            if (Array.isArray(tags)) {
-                const tagNames = tags.map(tag => {
-                    if (typeof tag === 'string') return tag;
-                    if (tag && tag.name) return tag.name;
-                    return '';
-                }).filter(name => name && name.trim() !== '');
-
-                return tagNames.length > 0 ? tagNames.join(', ') : '无标签';
-            }
-        } catch (e) {
-            // 如果解析失败，尝试直接使用
-            if (typeof tags === 'string') {
-                return tags;
-            }
-        }
-
-        return '无标签';
-    }
-
-    // 简单内容预览（不包含关键词过滤）
-    getSimplePreview(content, maxLength = 150) {
-        if (!content) return '';
-
-        // 移除HTML标签
-        const plainText = content.replace(/<[^>]*>/g, '');
-
-        // 截取指定长度
-        if (plainText.length <= maxLength) {
-            return plainText;
-        }
-
-        // 截取并在末尾加省略号
-        return plainText.substring(0, maxLength) + '...';
-    }
-
-    // 处理搜索结果中的文档查看
     async viewSearchDocument(docId) {
         try {
             if (window.documentManager) {
@@ -698,7 +715,6 @@ class KnowledgeBaseApp {
         }
     }
 
-    // 处理搜索结果中的文档编辑
     async editSearchDocument(docId) {
         try {
             if (window.documentManager) {
@@ -712,7 +728,6 @@ class KnowledgeBaseApp {
         }
     }
 
-    // 高亮文本
     highlightText(text, keyword) {
         if (!text || !keyword) return this.escapeHtml(text || '');
 
@@ -721,98 +736,90 @@ class KnowledgeBaseApp {
         return this.escapeHtml(text).replace(regex, '<mark>$1</mark>');
     }
 
-    // 转义正则表达式特殊字符
     escapeRegex(string) {
         return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
-    // 保存搜索历史
     saveToSearchHistory(keyword) {
         if (!keyword || keyword.trim() === '') return;
 
         const trimmedKeyword = keyword.trim();
 
-        // 移除重复项
         this.searchHistory = this.searchHistory.filter(item => item !== trimmedKeyword);
-        // 添加到开头
         this.searchHistory.unshift(trimmedKeyword);
-        // 限制历史记录数量
         this.searchHistory = this.searchHistory.slice(0, 10);
-        // 保存到本地存储
         localStorage.setItem('searchHistory', JSON.stringify(this.searchHistory));
+
+        this.updateSearchStats();
     }
 
-    // 清除搜索筛选
     clearSearchFilters() {
         const searchCategory = document.getElementById('search-category');
         const searchTag = document.getElementById('search-tag');
-        const globalSearch = document.getElementById('global-search');
+        const searchSort = document.getElementById('search-sort');
+        const searchStatus = document.getElementById('search-status');
 
         if (searchCategory) searchCategory.value = '';
-        if (searchTag) searchTag.value = '';
+        if (searchTag) {
+            if (searchTag.multiple) {
+                Array.from(searchTag.options).forEach(option => option.selected = false);
+            } else {
+                searchTag.value = '';
+            }
+        }
+        if (searchSort) searchSort.value = 'relevance';
 
-        // 如果搜索框有内容，重新搜索
+        if (searchStatus) {
+            searchStatus.style.display = 'none';
+        }
+
+        const globalSearch = document.getElementById('global-search');
         if (globalSearch && globalSearch.value.trim()) {
             this.performSearch();
         }
     }
 
-    // 导出搜索结果
-    exportSearchResults() {
-        const resultsContainer = document.getElementById('search-results');
-        if (!resultsContainer) return;
-
-        const results = Array.from(resultsContainer.querySelectorAll('.search-result-item'));
-        if (results.length === 0) {
-            this.showError('没有可导出的搜索结果');
-            return;
-        }
-
-        const exportData = results.map(item => {
-            const titleElem = item.querySelector('.result-title');
-            const categoryElem = item.querySelector('.meta-item:nth-child(1)');
-            const timeElem = item.querySelector('.meta-item:nth-child(3)');
-
-            return {
-                title: titleElem ? titleElem.textContent.replace(/🔍/g, '').trim() : '',
-                category: categoryElem ? categoryElem.textContent.replace('分类:', '').trim() : '',
-                updateTime: timeElem ? timeElem.textContent.replace('更新时间:', '').trim() : ''
-            };
-        }).filter(item => item.title); // 过滤掉空标题
-
-        if (exportData.length === 0) {
-            this.showError('没有有效的搜索结果可以导出');
-            return;
-        }
-
-        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `search-results-${new Date().toISOString().split('T')[0]}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-
-        this.showSuccess(`已导出 ${exportData.length} 条搜索结果`);
-    }
-
     async setupSearchPage() {
         console.log('设置搜索页面');
-        // 加载标签数据用于筛选
-        await this.loadTagsForSearch();
 
-        // 显示搜索历史
-        this.displaySearchHistory();
+        try {
+            const filterContent = document.getElementById('filter-content');
+            const toggleIcon = document.querySelector('.filter-header .toggle-icon');
+
+            if (filterContent && toggleIcon) {
+                filterContent.style.display = 'block';
+                toggleIcon.textContent = '▲';
+                console.log('高级筛选器已展开');
+            }
+
+            await Promise.all([
+                this.loadCategoriesForFilter(),
+                this.loadTagsForSearch()
+            ]);
+
+            this.displaySearchHistory();
+            this.updateSearchStats();
+
+        } catch (error) {
+            console.error('设置搜索页面失败:', error);
+            this.showError('初始化搜索页面失败: ' + error.message);
+        }
     }
 
     async loadTagsForSearch() {
         try {
             const userId = authManager.getCurrentUserId();
+            console.log('加载搜索标签，用户ID:', userId);
+
             const response = await axios.get(`/api/tag/user/${userId}`);
+            console.log('标签响应:', response.data);
 
             if (response.data.success) {
                 const tags = response.data.data || [];
+                console.log(`获取到 ${tags.length} 个标签`);
                 this.updateTagFilter(tags);
+            } else {
+                console.error('加载标签失败:', response.data.message);
             }
         } catch (error) {
             console.error('加载标签失败:', error);
@@ -821,18 +828,58 @@ class KnowledgeBaseApp {
 
     updateTagFilter(tags) {
         const tagSelect = document.getElementById('search-tag');
-        if (tagSelect && tags.length > 0) {
+        if (tagSelect) {
             tagSelect.innerHTML = '<option value="">全部标签</option>';
-            tags.forEach(tag => {
-                const option = document.createElement('option');
-                option.value = tag.id;
-                option.textContent = tag.name;
-                tagSelect.appendChild(option);
-            });
+
+            tagSelect.multiple = true;
+            tagSelect.style.height = '100px';
+
+            if (tags && tags.length > 0) {
+                tags.forEach(tag => {
+                    const option = document.createElement('option');
+                    option.value = tag.id;
+                    option.textContent = tag.name;
+                    option.dataset.tagName = tag.name;
+                    tagSelect.appendChild(option);
+                });
+
+                const hint = document.createElement('div');
+                hint.className = 'select-hint';
+                hint.textContent = '按住 Ctrl/Cmd 键可多选';
+                hint.style.fontSize = '12px';
+                hint.style.color = '#666';
+                hint.style.marginTop = '5px';
+
+                if (!document.querySelector('.select-hint')) {
+                    tagSelect.parentNode.appendChild(hint);
+                }
+
+                console.log(`更新标签筛选器，添加 ${tags.length} 个标签选项（支持多选）`);
+            } else {
+                console.warn('没有标签数据可供筛选');
+            }
+        } else {
+            console.error('标签筛选器元素未找到');
         }
     }
 
-    // 显示搜索历史
+    updateSearchStats() {
+        const historyCount = document.getElementById('history-count');
+        const historyCountBadge = document.getElementById('history-count-badge');
+
+        if (historyCount) {
+            historyCount.textContent = this.searchHistory.length;
+        }
+        if (historyCountBadge) {
+            historyCountBadge.textContent = this.searchHistory.length;
+        }
+
+        const recentSearch = document.getElementById('recent-search');
+        if (recentSearch && this.searchHistory.length > 0) {
+            recentSearch.textContent = this.searchHistory[0];
+        }
+    }
+
     displaySearchHistory() {
         const historyContainer = document.getElementById('search-history');
         if (!historyContainer) {
@@ -842,47 +889,32 @@ class KnowledgeBaseApp {
 
         if (!this.searchHistory || this.searchHistory.length === 0) {
             historyContainer.innerHTML = `
-                <div class="search-history-section">
-                    <h4>搜索历史</h4>
-                    <div class="no-history">
-                        <span>暂无搜索历史</span>
-                    </div>
+                <div class="no-history">
+                    <span>暂无搜索历史</span>
                 </div>
             `;
             return;
         }
 
-        historyContainer.innerHTML = `
-            <div class="search-history-section">
-                <div class="search-history-header">
-                    <h4>搜索历史</h4>
-                    <button onclick="app.clearSearchHistory()" class="btn-secondary btn-small">清除历史</button>
-                </div>
-                <div class="history-items">
-                    ${this.searchHistory.map(item => `
-                        <div class="history-item">
-                            <span class="history-text" onclick="event.stopPropagation(); app.useHistoryItem('${this.escapeHtml(item)}')">
-                                ${this.escapeHtml(item)}
-                            </span>
-                            <button onclick="event.stopPropagation(); app.removeHistoryItem('${this.escapeHtml(item)}')" class="btn-remove" title="删除此项">×</button>
-                        </div>
-                    `).join('')}
-                </div>
+        historyContainer.innerHTML = this.searchHistory.map(item => `
+            <div class="history-item">
+                <span class="history-text" onclick="event.stopPropagation(); app.useHistoryItem('${this.escapeHtml(item)}')">
+                    ${this.escapeHtml(item)}
+                </span>
+                <button onclick="event.stopPropagation(); app.removeHistoryItem('${this.escapeHtml(item)}')" 
+                        class="btn-remove" title="删除此项">×</button>
             </div>
-        `;
+        `).join('');
     }
 
-    // 删除历史项
     removeHistoryItem(item) {
-        // event.stopPropagation() 已经在HTML中调用
         this.searchHistory = this.searchHistory.filter(history => history !== item);
         localStorage.setItem('searchHistory', JSON.stringify(this.searchHistory));
         this.displaySearchHistory();
+        this.updateSearchStats();
     }
 
-    // 使用历史项
     useHistoryItem(item) {
-        // event.stopPropagation() 已经在HTML中调用
         const globalSearch = document.getElementById('global-search');
         if (globalSearch) {
             globalSearch.value = item;
@@ -894,6 +926,11 @@ class KnowledgeBaseApp {
         this.searchHistory = [];
         localStorage.removeItem('searchHistory');
         this.displaySearchHistory();
+        this.updateSearchStats();
+    }
+
+    exportSearchResults() {
+        this.showSuccess('导出功能正在开发中...');
     }
 
     escapeHtml(unsafe) {
@@ -929,7 +966,6 @@ class KnowledgeBaseApp {
 window.addEventListener('error', function(event) {
     console.error('全局错误捕获:', event.error);
 
-    // 屏蔽特定错误
     if (event.error && event.error.message &&
         (event.error.message.includes('未加载') ||
             event.error.message.includes('未初始化'))) {
@@ -938,7 +974,6 @@ window.addEventListener('error', function(event) {
     }
 });
 
-// 未捕获的Promise错误
 window.addEventListener('unhandledrejection', function(event) {
     console.error('未处理的Promise错误:', event.reason);
     event.preventDefault();
